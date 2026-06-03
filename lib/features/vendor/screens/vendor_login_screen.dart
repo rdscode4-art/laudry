@@ -4,13 +4,15 @@ import '../../../core/constants/colors.dart';
 import '../../../core/widgets/shared_widgets.dart';
 import '../../../services/api_service.dart';
 import 'vendor_home_screen.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 
 class VendorLoginScreen extends StatefulWidget {
   const VendorLoginScreen({super.key});
   @override State<VendorLoginScreen> createState() => _VendorLoginScreenState();
 }
 class _VendorLoginScreenState extends State<VendorLoginScreen> {
-  final _idCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _shopNameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
@@ -18,10 +20,12 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
   bool _obscure = true;
   bool _isLogin = true;
   bool _isLoading = false;
+  double? _latitude;
+  double? _longitude;
 
   @override
   void dispose() {
-    _idCtrl.dispose();
+    _emailCtrl.dispose();
     _passCtrl.dispose();
     _shopNameCtrl.dispose();
     _phoneCtrl.dispose();
@@ -40,20 +44,61 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
     );
   }
 
+  Future<void> _fetchLocation() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _showMessage('Location services are disabled.');
+      return;
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        _showMessage('Location permissions are denied');
+        return;
+      }
+    }
+    if (permission == LocationPermission.deniedForever) {
+      _showMessage('Location permissions are permanently denied, we cannot request permissions.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      _latitude = position.latitude;
+      _longitude = position.longitude;
+
+      List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks.first;
+        _addressCtrl.text = "${place.name}, ${place.subLocality}, ${place.locality}, ${place.postalCode}, ${place.country}";
+      }
+    } catch (e) {
+      _showMessage('Failed to fetch location: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _submit() async {
-    final id = _idCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
     final pass = _passCtrl.text.trim();
     if (_isLogin) {
-      if (id.isEmpty || pass.isEmpty) {
-        _showMessage('Vendor ID and password are required');
+      if (email.isEmpty || pass.isEmpty) {
+        _showMessage('Email and password are required');
         return;
       }
     } else {
       final shopName = _shopNameCtrl.text.trim();
       final phone = _phoneCtrl.text.trim();
       final address = _addressCtrl.text.trim();
-      if (shopName.isEmpty || pass.isEmpty) {
-        _showMessage('Shop name and password are required for signup');
+      if (email.isEmpty || shopName.isEmpty || pass.isEmpty) {
+        _showMessage('Email, shop name and password are required for signup');
         return;
       }
     }
@@ -61,7 +106,7 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
     setState(() => _isLoading = true);
     try {
       if (_isLogin) {
-        final result = await ApiService.loginVendor(id, pass);
+        final result = await ApiService.loginVendor(email, pass);
         ApiService.instance.currentVendorAuth = result;
         Get.off(() => VendorHomeScreen(vendorName: result.shopName));
       } else {
@@ -69,7 +114,13 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
         final phone = _phoneCtrl.text.trim();
         final address = _addressCtrl.text.trim();
 
-        final result = await ApiService.signupVendor(pass, shopName, phone, address);
+        if (_latitude == null || _longitude == null) {
+          _showMessage('Please fetch your shop location first');
+          setState(() => _isLoading = false);
+          return;
+        }
+
+        final result = await ApiService.signupVendor(email, pass, shopName, phone, address, latitude: _latitude, longitude: _longitude);
         ApiService.instance.currentVendorAuth = result;
         _showMessage('Vendor registered successfully. Your Vendor ID is ${result.vendorId}', color: kOrange);
         Get.off(() => VendorHomeScreen(vendorName: result.shopName));
@@ -105,15 +156,27 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
                 Text(_isLogin ? 'Login to manage your orders' : 'Register your laundry shop to receive orders', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
                 const SizedBox(height: 22),
                 if (!_isLogin) ...[
+                  TextField(controller: _emailCtrl, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email Address', prefixIcon: Icon(Icons.email_outlined))),
+                  const SizedBox(height: 14),
                   TextField(controller: _shopNameCtrl, decoration: const InputDecoration(labelText: 'Shop Name', prefixIcon: Icon(Icons.storefront))),
                   const SizedBox(height: 14),
                   TextField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone', prefixIcon: Icon(Icons.phone_outlined))),
                   const SizedBox(height: 14),
                   TextField(controller: _addressCtrl, decoration: const InputDecoration(labelText: 'Address', prefixIcon: Icon(Icons.location_on_outlined))),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _isLoading ? null : _fetchLocation,
+                    icon: const Icon(Icons.my_location, size: 18),
+                    label: Text(_latitude == null ? 'Fetch My Shop Location' : 'Location Captured ✅'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _latitude == null ? kPrimaryBlue : kAccentGreen,
+                      side: BorderSide(color: _latitude == null ? kPrimaryBlue : kAccentGreen),
+                    ),
+                  ),
                   const SizedBox(height: 14),
                 ],
                 if (_isLogin) ...[
-                  TextField(controller: _idCtrl, decoration: const InputDecoration(labelText: 'Vendor ID', prefixIcon: Icon(Icons.store_outlined))),
+                  TextField(controller: _emailCtrl, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email Address', prefixIcon: Icon(Icons.email_outlined))),
                   const SizedBox(height: 14),
                 ],
                 TextField(
@@ -141,7 +204,7 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
                 ),
                 if (_isLogin) ...[
                   const SizedBox(height: 14),
-                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: kOrange.withOpacity(0.07), borderRadius: BorderRadius.circular(10)), child: const Text('Demo: vendor01 / rideal123', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: kOrange))),
+                  Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: kOrange.withOpacity(0.07), borderRadius: BorderRadius.circular(10)), child: const Text('Demo: vendor@rideal.com / rideal123', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: kOrange))),
                 ]
               ]),
             ),

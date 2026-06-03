@@ -4,6 +4,8 @@ import '../../../core/constants/colors.dart';
 import '../../../core/widgets/shared_widgets.dart';
 import '../../../services/api_service.dart';
 import 'delivery_home_screen.dart';
+import 'delivery_kyc_screen.dart';
+import 'delivery_kyc_pending_screen.dart';
 
 class DeliveryLoginScreen extends StatefulWidget {
   const DeliveryLoginScreen({super.key});
@@ -61,7 +63,13 @@ class _DeliveryLoginScreenState extends State<DeliveryLoginScreen> {
     try {
       if (_isLogin) {
         final result = await ApiService.loginDeliveryBoy(login, pass);
-        Get.off(() => DeliveryHomeScreen(boyName: result.name));
+        if (result.kycStatus == 'pending') {
+          Get.off(() => DeliveryKycScreen(boyName: result.name));
+        } else if (result.kycStatus == 'submitted') {
+          Get.off(() => const DeliveryKycPendingScreen());
+        } else {
+          Get.off(() => DeliveryHomeScreen(boyName: result.name));
+        }
       } else {
         final name = _nameCtrl.text.trim();
         final email = _emailCtrl.text.trim();
@@ -69,7 +77,14 @@ class _DeliveryLoginScreenState extends State<DeliveryLoginScreen> {
 
         final result = await ApiService.signupDeliveryBoy(pass, name, email, phone);
         _showMessage('Delivery partner registered successfully. Your ID is ${result.deliveryId}', color: kAccentGreen);
-        Get.off(() => DeliveryHomeScreen(boyName: result.name));
+        
+        if (result.kycStatus == 'pending') {
+          Get.off(() => DeliveryKycScreen(boyName: result.name));
+        } else if (result.kycStatus == 'submitted') {
+          Get.off(() => const DeliveryKycPendingScreen());
+        } else {
+          Get.off(() => DeliveryHomeScreen(boyName: result.name));
+        }
       }
     } on ApiException catch (err) {
       _showMessage(err.message);

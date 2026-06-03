@@ -3,15 +3,28 @@ import 'package:get/get.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
 import '../../../core/models/delivery_order.dart';
+import '../../../services/api_service.dart';
 import '../screens/delivery_order_detail_screen.dart';
 
-class DeliveryOrderCard extends StatelessWidget {
+class DeliveryOrderCard extends StatefulWidget {
   final DeliveryOrder order; final VoidCallback onUpdated;
-  const DeliveryOrderCard({super.key, required this.order, required this.onUpdated});
+  final bool isAvailable;
+  const DeliveryOrderCard({super.key, required this.order, required this.onUpdated, this.isAvailable = false});
+  @override State<DeliveryOrderCard> createState() => _DeliveryOrderCardState();
+}
+
+class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
+  bool _loadingAccept = false;
+
   @override
   Widget build(BuildContext context) {
+    final order = widget.order;
     return GestureDetector(
-      onTap: () async { await Get.to(() => DeliveryOrderDetailScreen(order: order)); onUpdated(); },
+      onTap: () async { 
+        if (widget.isAvailable) return; // Must accept first
+        await Get.to(() => DeliveryOrderDetailScreen(order: order)); 
+        widget.onUpdated(); 
+      },
       child: Container(margin: const EdgeInsets.only(bottom: 14), padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: kCardBg, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: const Offset(0, 4))]), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: order.status.color.withOpacity(0.12), borderRadius: BorderRadius.circular(12)), child: Icon(order.status.icon, color: order.status.color, size: 22)),
@@ -23,6 +36,27 @@ class DeliveryOrderCard extends StatelessWidget {
         Row(children: [const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey), const SizedBox(width: 4), Expanded(child: Text(order.customerAddress, style: TextStyle(fontSize: 12, color: Colors.grey.shade600), maxLines: 1, overflow: TextOverflow.ellipsis))]),
         const SizedBox(height: 6),
         Row(children: [_chip(Icons.checkroom_outlined, '${order.totalItems} items', kAccentBlue), const SizedBox(width: 8), _chip(Icons.local_laundry_service_outlined, order.service, kAccentGreen), const SizedBox(width: 8), _chip(Icons.confirmation_number_outlined, 'Token: ${order.token}', kOrange)]),
+        if (widget.isAvailable) ...[
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: _loadingAccept ? null : () async {
+              setState(() => _loadingAccept = true);
+              try {
+                if (order.status == OrderStatus.pending) {
+                  await ApiService.instance.acceptPickup(order.id);
+                } else {
+                  await ApiService.instance.acceptRide(order.id);
+                }
+                widget.onUpdated();
+              } catch (e) {
+                Get.snackbar('Error', e.toString());
+                setState(() => _loadingAccept = false);
+              }
+            },
+            style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(40), backgroundColor: kAccentGreen),
+            child: _loadingAccept ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Accept Ride'),
+          )
+        ]
       ])),
     );
   }

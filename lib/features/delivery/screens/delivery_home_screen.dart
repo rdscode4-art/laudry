@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
 import '../../../core/models/delivery_order.dart';
+import '../../../services/api_service.dart';
 import '../widgets/delivery_order_card.dart';
 
 class DeliveryHomeScreen extends StatefulWidget {
@@ -11,13 +14,107 @@ class DeliveryHomeScreen extends StatefulWidget {
   @override State<DeliveryHomeScreen> createState() => _DeliveryHomeScreenState();
 }
 class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
-  int _tab = 0;
-  int get _pending => sharedOrders.where((o) => o.status == OrderStatus.pending).length;
-  int get _active  => sharedOrders.where((o) => o.status == OrderStatus.pickedUp || o.status == OrderStatus.outForDelivery).length;
-  int get _done    => sharedOrders.where((o) => o.status == OrderStatus.delivered).length;
-  List<DeliveryOrder> get _list => _tab == 0
-      ? sharedOrders.where((o) => o.status != OrderStatus.delivered).toList()
-      : sharedOrders.where((o) => o.status == OrderStatus.delivered).toList();
+  int _tab = 1;
+  bool _loading = false;
+  List<DeliveryOrder> _available = [];
+  List<DeliveryOrder> _myRides = [];
+
+  bool _isOnline = false;
+  Timer? _locationTimer;
+  Position? _lastPosition;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchData();
+  }
+
+  @override
+  void dispose() {
+    _locationTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _toggleStatus(bool val) async {
+    setState(() => _isOnline = val);
+    try {
+      await ApiService.updateDriverStatus(val ? 'online' : 'offline');
+      if (val) {
+        _startLocationTracking();
+      } else {
+        _locationTimer?.cancel();
+        _locationTimer = null;
+      }
+    } catch (e) {
+      setState(() => _isOnline = !val);
+      Get.snackbar('Error', 'Could not update status');
+    }
+  }
+
+  Future<void> _startLocationTracking() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return;
+    }
+    if (permission == LocationPermission.deniedForever) return;
+
+    _locationTimer?.cancel();
+    _checkAndSendLocation(); // send immediately once
+    _locationTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      _checkAndSendLocation();
+    });
+  }
+
+  Future<void> _checkAndSendLocation() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      if (_lastPosition != null) {
+        final dist = Geolocator.distanceBetween(_lastPosition!.latitude, _lastPosition!.longitude, pos.latitude, pos.longitude);
+        if (dist > 200) {
+          await ApiService.updateDriverLocation(pos.latitude, pos.longitude);
+          _lastPosition = pos;
+        }
+      } else {
+        await ApiService.updateDriverLocation(pos.latitude, pos.longitude);
+        _lastPosition = pos;
+      }
+    } catch (e) {
+      debugPrint('Location error: $e');
+    }
+  }
+
+  Future<void> _fetchData() async {
+    setState(() => _loading = true);
+    try {
+      final pickups = await ApiService.instance.fetchAvailablePickups();
+      final deliveries = await ApiService.instance.fetchAvailableDeliveries();
+      final myRides = await ApiService.instance.fetchMyRides();
+      
+      if (mounted) {
+        setState(() {
+          _available = [...pickups, ...deliveries];
+          _myRides = myRides;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        Get.snackbar('Error', e.toString());
+      }
+    }
+  }
+
+  int get _requests => _available.length;
+  int get _activeCount => _myRides.where((o) => o.status != OrderStatus.delivered).length;
+  int get _doneCount   => _myRides.where((o) => o.status == OrderStatus.delivered).length;
+  
+  List<DeliveryOrder> get _list {
+    if (_tab == 0) return _available;
+    if (_tab == 1) return _myRides.where((o) => o.status != OrderStatus.delivered).toList();
+    return _myRides.where((o) => o.status == OrderStatus.delivered).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,15 +126,21 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       ),
       body: Column(children: [
         Container(color: kPrimaryBlue, padding: const EdgeInsets.fromLTRB(16, 0, 16, 20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Hello, ${widget.boyName} 👋', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('Hello, ${widget.boyName} 👋', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            Row(children: [
+              Text(_isOnline ? 'Online' : 'Offline', style: TextStyle(color: _isOnline ? kAccentGreen : Colors.white54, fontSize: 14, fontWeight: FontWeight.bold)),
+              Switch(value: _isOnline, onChanged: _toggleStatus, activeColor: kAccentGreen, activeTrackColor: kAccentGreen.withOpacity(0.5)),
+            ]),
+          ]),
           const SizedBox(height: 4), const Text("Here's your delivery dashboard", style: TextStyle(color: Colors.white60, fontSize: 12)),
           const SizedBox(height: 16),
-          Row(children: [_badge('Pending', '$_pending', kOrange), const SizedBox(width: 10), _badge('Active', '$_active', Colors.teal), const SizedBox(width: 10), _badge('Delivered', '$_done', kAccentGreen)]),
+          Row(children: [_badge('Requests', '$_requests', kOrange), const SizedBox(width: 10), _badge('Active', '$_activeCount', Colors.teal), const SizedBox(width: 10), _badge('Delivered', '$_doneCount', kAccentGreen)]),
         ])),
-        Container(color: kCardBg, child: Row(children: [_tabBtn('Active Orders', 0), _tabBtn('Delivered', 1)])),
-        Expanded(child: _list.isEmpty
+        Container(color: kCardBg, child: Row(children: [_tabBtn('Available', 0), _tabBtn('Active', 1), _tabBtn('Delivered', 2)])),
+        Expanded(child: _loading ? const Center(child: CircularProgressIndicator()) : _list.isEmpty
             ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.inbox_outlined, size: 64, color: Colors.grey.shade300), const SizedBox(height: 12), Text('No orders here', style: TextStyle(color: Colors.grey.shade400, fontSize: 16))]))
-            : ListView.builder(padding: const EdgeInsets.all(16), itemCount: _list.length, itemBuilder: (_, i) => DeliveryOrderCard(order: _list[i], onUpdated: () => setState(() {})))),
+            : RefreshIndicator(onRefresh: _fetchData, child: ListView.builder(padding: const EdgeInsets.all(16), itemCount: _list.length, itemBuilder: (_, i) => DeliveryOrderCard(order: _list[i], onUpdated: _fetchData, isAvailable: _tab == 0)))),
       ]),
     );
   }

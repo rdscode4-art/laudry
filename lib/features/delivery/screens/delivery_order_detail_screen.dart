@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
 import '../../../core/models/delivery_order.dart';
+import '../../../services/api_service.dart';
 
 class DeliveryOrderDetailScreen extends StatefulWidget {
   final DeliveryOrder order;
@@ -10,20 +11,80 @@ class DeliveryOrderDetailScreen extends StatefulWidget {
   @override State<DeliveryOrderDetailScreen> createState() => _DeliveryOrderDetailScreenState();
 }
 class _DeliveryOrderDetailScreenState extends State<DeliveryOrderDetailScreen> {
-  final _pickupCtrl = TextEditingController(), _deliveryCtrl = TextEditingController();
-  @override void dispose() { _pickupCtrl.dispose(); _deliveryCtrl.dispose(); super.dispose(); }
+  final _pickupCtrl = TextEditingController();
+  final _vendorDropoffCtrl = TextEditingController();
+  final _vendorDispatchCtrl = TextEditingController();
+  final _deliveryCtrl = TextEditingController();
 
-  void _verifyPickup() {
-    if (_pickupCtrl.text.trim() != widget.order.pickupOtp) { Get.snackbar('Error', '❌ Wrong Pickup OTP', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.red, colorText: Colors.white); return; }
-    setState(() => widget.order.status = OrderStatus.pickedUp); _pickupCtrl.clear();
-    Get.snackbar('Success', '✅ Pickup verified!', snackPosition: SnackPosition.BOTTOM, backgroundColor: kAccentGreen, colorText: Colors.white);
+  bool _loading = false;
+
+  @override void dispose() { 
+    _pickupCtrl.dispose(); 
+    _vendorDropoffCtrl.dispose(); 
+    _vendorDispatchCtrl.dispose(); 
+    _deliveryCtrl.dispose(); 
+    super.dispose(); 
   }
-  void _verifyDelivery() {
-    if (_deliveryCtrl.text.trim() != widget.order.deliveryOtp) { Get.snackbar('Error', '❌ Wrong Delivery OTP', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.red, colorText: Colors.white); return; }
-    setState(() => widget.order.status = OrderStatus.delivered); _deliveryCtrl.clear();
-    Get.snackbar('Success', '✅ Delivered!', snackPosition: SnackPosition.BOTTOM, backgroundColor: kAccentGreen, colorText: Colors.white);
+
+  Future<void> _verifyPickup() async {
+    if (_pickupCtrl.text.trim().isEmpty) { Get.snackbar('Error', 'Please enter OTP', backgroundColor: Colors.red, colorText: Colors.white); return; }
+    setState(() => _loading = true);
+    try {
+      await ApiService.instance.verifyPickupOtp(widget.order.id, _pickupCtrl.text.trim());
+      setState(() => widget.order.status = OrderStatus.pickedUp);
+      _pickupCtrl.clear();
+      Get.snackbar('Success', '✅ Pickup verified!', backgroundColor: kAccentGreen, colorText: Colors.white);
+    } catch (e) {
+      Get.snackbar('Error', '❌ ${e.toString()}', backgroundColor: Colors.red, colorText: Colors.white);
+    } finally {
+      setState(() => _loading = false);
+    }
   }
-  void _next(OrderStatus s) { setState(() => widget.order.status = s); Get.snackbar('Update', 'Status: ${s.label}', snackPosition: SnackPosition.BOTTOM, backgroundColor: s.color, colorText: Colors.white); }
+
+  Future<void> _verifyVendorDropoff() async {
+    if (_vendorDropoffCtrl.text.trim().isEmpty) { Get.snackbar('Error', 'Please enter OTP', backgroundColor: Colors.red, colorText: Colors.white); return; }
+    setState(() => _loading = true);
+    try {
+      await ApiService.instance.verifyVendorDropoffOtp(widget.order.id, _vendorDropoffCtrl.text.trim());
+      setState(() => widget.order.status = OrderStatus.inLaundry);
+      _vendorDropoffCtrl.clear();
+      Get.snackbar('Success', '✅ Dropped at Vendor!', backgroundColor: kAccentGreen, colorText: Colors.white);
+    } catch (e) {
+      Get.snackbar('Error', '❌ ${e.toString()}', backgroundColor: Colors.red, colorText: Colors.white);
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _verifyVendorDispatch() async {
+    if (_vendorDispatchCtrl.text.trim().isEmpty) { Get.snackbar('Error', 'Please enter OTP', backgroundColor: Colors.red, colorText: Colors.white); return; }
+    setState(() => _loading = true);
+    try {
+      await ApiService.instance.verifyVendorDispatchOtp(widget.order.id, _vendorDispatchCtrl.text.trim());
+      setState(() => widget.order.status = OrderStatus.outForDelivery);
+      _vendorDispatchCtrl.clear();
+      Get.snackbar('Success', '✅ Picked up from Vendor!', backgroundColor: kAccentGreen, colorText: Colors.white);
+    } catch (e) {
+      Get.snackbar('Error', '❌ ${e.toString()}', backgroundColor: Colors.red, colorText: Colors.white);
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _verifyDelivery() async {
+    if (_deliveryCtrl.text.trim().isEmpty) { Get.snackbar('Error', 'Please enter OTP', backgroundColor: Colors.red, colorText: Colors.white); return; }
+    setState(() => _loading = true);
+    try {
+      await ApiService.instance.completeRide(widget.order.id, _deliveryCtrl.text.trim());
+      setState(() => widget.order.status = OrderStatus.delivered);
+      _deliveryCtrl.clear();
+      Get.snackbar('Success', '✅ Delivered to Customer!', backgroundColor: kAccentGreen, colorText: Colors.white);
+    } catch (e) {
+      Get.snackbar('Error', '❌ ${e.toString()}', backgroundColor: Colors.red, colorText: Colors.white);
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,10 +98,26 @@ class _DeliveryOrderDetailScreenState extends State<DeliveryOrderDetailScreen> {
         const SizedBox(height: 14),
         _sec('Booking Token', Icons.confirmation_number_outlined, _row(Icons.confirmation_number_outlined, 'Token', o.token)),
         const SizedBox(height: 14),
-        if (o.status == OrderStatus.pending) _sec('Verify Pickup OTP', Icons.lock_outline, Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Text('Ask customer for Pickup OTP and enter below.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)), const SizedBox(height: 12), TextField(controller: _pickupCtrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: 'Enter Pickup OTP', hintText: 'e.g. 1234', prefixIcon: Icon(Icons.pin_outlined), counterText: '')), const SizedBox(height: 12), ElevatedButton.icon(onPressed: _verifyPickup, icon: const Icon(Icons.check_circle_outline), label: const Text('Verify & Pickup'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: kAccentBlue))])),
-        if (o.status == OrderStatus.pickedUp) ...[const SizedBox(height: 14), ElevatedButton.icon(onPressed: () => _next(OrderStatus.inLaundry), icon: const Icon(Icons.local_laundry_service), label: const Text('Mark as In Laundry'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: Colors.purple))],
-        if (o.status == OrderStatus.inLaundry) ...[const SizedBox(height: 14), ElevatedButton.icon(onPressed: () => _next(OrderStatus.outForDelivery), icon: const Icon(Icons.delivery_dining), label: const Text('Out for Delivery'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: Colors.teal))],
-        if (o.status == OrderStatus.outForDelivery) ...[const SizedBox(height: 14), _sec('Verify Delivery OTP', Icons.lock_outline, Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Text('Ask customer for Delivery OTP and enter below.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)), const SizedBox(height: 12), TextField(controller: _deliveryCtrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: 'Enter Delivery OTP', hintText: 'e.g. 1234', prefixIcon: Icon(Icons.pin_outlined), counterText: '')), const SizedBox(height: 12), ElevatedButton.icon(onPressed: _verifyDelivery, icon: const Icon(Icons.check_circle_outline), label: const Text('Verify & Complete Delivery'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: kAccentGreen))]))],
+        
+        // Phase 1: Pickup from Customer
+        if (o.status == OrderStatus.pending) 
+          _sec('Verify Pickup OTP', Icons.lock_outline, Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Text('Ask customer for Pickup OTP and enter below.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)), const SizedBox(height: 12), TextField(controller: _pickupCtrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: 'Enter Pickup OTP', hintText: 'e.g. 1234', prefixIcon: Icon(Icons.pin_outlined), counterText: '')), const SizedBox(height: 12), ElevatedButton.icon(onPressed: _loading ? null : _verifyPickup, icon: const Icon(Icons.check_circle_outline), label: _loading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Verify & Pickup'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: kAccentBlue))])),
+        
+        // Phase 1: Dropoff to Vendor
+        if (o.status == OrderStatus.pickedUp) 
+          _sec('Verify Vendor Dropoff OTP', Icons.lock_outline, Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Text('Ask vendor for Dropoff OTP and enter below.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)), const SizedBox(height: 12), TextField(controller: _vendorDropoffCtrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: 'Enter Dropoff OTP', hintText: 'e.g. 1234', prefixIcon: Icon(Icons.pin_outlined), counterText: '')), const SizedBox(height: 12), ElevatedButton.icon(onPressed: _loading ? null : _verifyVendorDropoff, icon: const Icon(Icons.check_circle_outline), label: _loading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Verify & Dropoff'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: Colors.purple))])),
+        
+        // Vendor Processing Wait (Mock transition for demo)
+        if (o.status == OrderStatus.inLaundry) ...[const SizedBox(height: 14), ElevatedButton.icon(onPressed: () => setState(() => widget.order.status = OrderStatus.readyForDelivery), icon: const Icon(Icons.check_circle), label: const Text('(Simulate) Ready for Delivery'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: Colors.grey))],
+        
+        // Phase 2: Pickup from Vendor
+        if (o.status == OrderStatus.readyForDelivery)
+          _sec('Verify Vendor Dispatch OTP', Icons.lock_outline, Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Text('Ask vendor for Dispatch OTP and enter below.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)), const SizedBox(height: 12), TextField(controller: _vendorDispatchCtrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: 'Enter Dispatch OTP', hintText: 'e.g. 1234', prefixIcon: Icon(Icons.pin_outlined), counterText: '')), const SizedBox(height: 12), ElevatedButton.icon(onPressed: _loading ? null : _verifyVendorDispatch, icon: const Icon(Icons.check_circle_outline), label: _loading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Verify & Dispatch'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: Colors.teal))])),
+
+        // Phase 2: Delivery to Customer
+        if (o.status == OrderStatus.outForDelivery)
+          _sec('Verify Customer Delivery OTP', Icons.lock_outline, Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Text('Ask customer for Delivery OTP and enter below.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)), const SizedBox(height: 12), TextField(controller: _deliveryCtrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: 'Enter Delivery OTP', hintText: 'e.g. 1234', prefixIcon: Icon(Icons.pin_outlined), counterText: '')), const SizedBox(height: 12), ElevatedButton.icon(onPressed: _loading ? null : _verifyDelivery, icon: const Icon(Icons.check_circle_outline), label: _loading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Verify & Complete Delivery'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: kAccentGreen))])),
+        
         if (o.status == OrderStatus.delivered) ...[const SizedBox(height: 14), Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: kAccentGreen.withOpacity(0.1), borderRadius: BorderRadius.circular(14)), child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.check_circle, color: kAccentGreen), SizedBox(width: 8), Text('Order Delivered Successfully', style: TextStyle(color: kAccentGreen, fontWeight: FontWeight.bold))]))],
         const SizedBox(height: 16),
       ])),

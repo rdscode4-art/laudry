@@ -142,7 +142,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             const Text('Available Plans', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 10),
           ],
-          ...plans.map((plan) {
+          Expanded(child: SingleChildScrollView(child: Column(children: [
+            ...plans.map((plan) {
             final sel = _sel != null && _sel!['code'] == plan['code'];
             final features = (plan['features'] as List<dynamic>).map((e) => e.toString()).toList();
             
@@ -170,8 +171,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                 Icon(sel ? Icons.check_circle : Icons.radio_button_unchecked, color: sel ? Colors.white : Colors.grey.shade400),
               ]),
             ));
-          }),
-          const Spacer(),
+          }).toList(),
+          ]))),
+          const SizedBox(height: 16),
           ElevatedButton(
             onPressed: () async {
               if (_sel == null) return;

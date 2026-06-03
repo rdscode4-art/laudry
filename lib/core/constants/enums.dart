@@ -8,9 +8,9 @@ extension ServiceTypeExt on ServiceType {
   IconData get icon { switch (this) { case ServiceType.laundry: return Icons.local_laundry_service; case ServiceType.dryCleaner: return Icons.cleaning_services; } }
 }
 
-enum OrderStatus { pending, pickedUp, inLaundry, outForDelivery, delivered }
+enum OrderStatus { pending, pickedUp, inLaundry, readyForDelivery, outForDelivery, delivered }
 extension OrderStatusExt on OrderStatus {
-  String get label { switch (this) { case OrderStatus.pending: return 'Pending Pickup'; case OrderStatus.pickedUp: return 'Picked Up'; case OrderStatus.inLaundry: return 'In Laundry'; case OrderStatus.outForDelivery: return 'Out for Delivery'; case OrderStatus.delivered: return 'Delivered'; } }
-  Color get color { switch (this) { case OrderStatus.pending: return kOrange; case OrderStatus.pickedUp: return kAccentBlue; case OrderStatus.inLaundry: return Colors.purple; case OrderStatus.outForDelivery: return Colors.teal; case OrderStatus.delivered: return kAccentGreen; } }
-  IconData get icon { switch (this) { case OrderStatus.pending: return Icons.schedule; case OrderStatus.pickedUp: return Icons.shopping_bag_outlined; case OrderStatus.inLaundry: return Icons.local_laundry_service; case OrderStatus.outForDelivery: return Icons.delivery_dining; case OrderStatus.delivered: return Icons.check_circle; } }
+  String get label { switch (this) { case OrderStatus.pending: return 'Pending Pickup'; case OrderStatus.pickedUp: return 'Picked Up'; case OrderStatus.inLaundry: return 'In Laundry'; case OrderStatus.readyForDelivery: return 'Ready for Delivery'; case OrderStatus.outForDelivery: return 'Out for Delivery'; case OrderStatus.delivered: return 'Delivered'; } }
+  Color get color { switch (this) { case OrderStatus.pending: return kOrange; case OrderStatus.pickedUp: return kAccentBlue; case OrderStatus.inLaundry: return Colors.purple; case OrderStatus.readyForDelivery: return Colors.indigo; case OrderStatus.outForDelivery: return Colors.teal; case OrderStatus.delivered: return kAccentGreen; } }
+  IconData get icon { switch (this) { case OrderStatus.pending: return Icons.schedule; case OrderStatus.pickedUp: return Icons.shopping_bag_outlined; case OrderStatus.inLaundry: return Icons.local_laundry_service; case OrderStatus.readyForDelivery: return Icons.inventory_2_outlined; case OrderStatus.outForDelivery: return Icons.delivery_dining; case OrderStatus.delivered: return Icons.check_circle; } }
 }

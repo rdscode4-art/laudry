@@ -195,6 +195,7 @@ class DeliveryAuth {
   final String name;
   final String email;
   final String phone;
+  final String kycStatus;
 
   DeliveryAuth({
     required this.token,
@@ -202,6 +203,7 @@ class DeliveryAuth {
     required this.name,
     required this.email,
     required this.phone,
+    required this.kycStatus,
   });
 
   factory DeliveryAuth.fromJson(Map<String, dynamic> json) => DeliveryAuth(
@@ -210,6 +212,7 @@ class DeliveryAuth {
         name: json['deliveryBoy']['name'] as String,
         email: (json['deliveryBoy']['email'] as String?) ?? '',
         phone: (json['deliveryBoy']['phone'] as String?) ?? '',
+        kycStatus: (json['deliveryBoy']['kycStatus'] as String?) ?? 'pending',
       );
 }
 
@@ -330,18 +333,73 @@ class _VendorSessionStore {
   bool get isLoggedIn => token != null;
 }
 
+// ── Delivery Session Store ───────────────────────────────────────
+class _DeliverySessionStore {
+  static const _tokenKey = 'rideal_delivery_token';
+  static const _idKey = 'rideal_delivery_id';
+  static const _nameKey = 'rideal_delivery_name';
+  static const _kycKey = 'rideal_delivery_kyc';
+
+  String? token;
+  String? deliveryId;
+  String? name;
+  String? kycStatus;
+
+  Future<void> load() async {
+    final p = await SharedPreferences.getInstance();
+    token = p.getString(_tokenKey);
+    deliveryId = p.getString(_idKey);
+    name = p.getString(_nameKey);
+    kycStatus = p.getString(_kycKey) ?? 'pending';
+  }
+
+  Future<void> save(DeliveryAuth d) async {
+    token = d.token;
+    deliveryId = d.deliveryId;
+    name = d.name;
+    kycStatus = d.kycStatus;
+    
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_tokenKey, d.token);
+    await p.setString(_idKey, d.deliveryId);
+    await p.setString(_nameKey, d.name);
+    await p.setString(_kycKey, d.kycStatus);
+  }
+
+  Future<void> clear() async {
+    token = deliveryId = name = kycStatus = null;
+    final p = await SharedPreferences.getInstance();
+    await p.remove(_tokenKey);
+    await p.remove(_idKey);
+    await p.remove(_nameKey);
+    await p.remove(_kycKey);
+  }
+
+  bool get isLoggedIn => token != null;
+}
+
 // ── ApiService ──────────────────────────────────────────────────
 class ApiService {
   static String get baseUrl => _kDefaultBase;
 
   final _session = _SessionStore();
   final _vendorSession = _VendorSessionStore();
+  final _deliverySession = _DeliverySessionStore();
 
   ApiService._();
   static final ApiService instance = ApiService._();
 
   bool get isLoggedIn => _session.isLoggedIn;
   bool get isVendorLoggedIn => _vendorSession.isLoggedIn;
+  bool get isDeliveryLoggedIn => _deliverySession.isLoggedIn;
+
+  CustomerSession? get currentCustomer => isLoggedIn
+      ? CustomerSession(token: _session.token!, name: _session.name!, email: _session.email!, id: _session.id!, vendorId: _session.vendorId, referralCode: _session.referralCode)
+      : null;
+
+  DeliveryAuth? get currentDeliveryAuth => isDeliveryLoggedIn
+      ? DeliveryAuth(token: _deliverySession.token!, deliveryId: _deliverySession.deliveryId!, name: _deliverySession.name!, email: '', phone: '', kycStatus: _deliverySession.kycStatus!)
+      : null;
 
   String? get currentEmail  => _session.email;
   String? get currentName   => _session.name;
@@ -371,12 +429,14 @@ class ApiService {
   Future<void> loadSession() async {
     await _session.load();
     await _vendorSession.load();
+    await _deliverySession.load();
   }
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         if (_session.token != null) 'Authorization': 'Bearer ${_session.token}',
         if (_vendorSession.token != null) 'Authorization': 'Bearer ${_vendorSession.token}',
+        if (_deliverySession.token != null) 'Authorization': 'Bearer ${_deliverySession.token}',
       };
 
   Future<Map<String, dynamic>> _request(
@@ -394,10 +454,10 @@ class ApiService {
         res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 15));
         break;
       case 'POST':
-        res = await http.post(uri, headers: _headers, body: jsonEncode(body)).timeout(const Duration(seconds: 15));
+        res = await http.post(uri, headers: _headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15));
         break;
       case 'PATCH':
-        res = await http.patch(uri, headers: _headers, body: jsonEncode(body)).timeout(const Duration(seconds: 15));
+        res = await http.patch(uri, headers: _headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15));
         break;
       default:
         throw ApiException('Unsupported method $method');
@@ -450,7 +510,42 @@ class ApiService {
 
   Future<void> logout() => _session.clear();
 
-  // ── Vendor list ───────────────────────────────────────────────
+  static Future<void> updateDriverLocation(double lat, double lng) async {
+    final res = await http.put(
+      Uri.parse('$_kDefaultBase/api/driver/location'),
+      headers: instance._headers,
+      body: jsonEncode({'latitude': lat, 'longitude': lng}),
+    );
+    if (res.statusCode != 200) throw Exception(res.body);
+  }
+
+  static Future<void> updateDriverStatus(String status) async {
+    final res = await http.post(
+      Uri.parse('$_kDefaultBase/api/driver/status'),
+      headers: instance._headers,
+      body: jsonEncode({'status': status}),
+    );
+    if (res.statusCode != 200) throw Exception(res.body);
+  }
+
+  static Future<void> fetchDriverProfile() async {
+    final res = await instance._request('GET', '/api/driver/profile');
+    final driver = res['data'] as Map<String, dynamic>;
+    if (instance.currentDeliveryAuth != null) {
+      final current = instance.currentDeliveryAuth!;
+      final updated = DeliveryAuth(
+        token: current.token,
+        deliveryId: current.deliveryId,
+        name: driver['name'] as String? ?? current.name,
+        email: driver['email'] as String? ?? current.email,
+        phone: driver['phone'] as String? ?? current.phone,
+        kycStatus: driver['kyc_status'] as String? ?? current.kycStatus,
+      );
+      await instance._deliverySession.save(updated);
+    }
+  }
+
+  // ── Vendor Endpoints ───────────────────────────────────────────────
 
   Future<List<VendorInfo>> fetchVendors() async {
     final res = await _request('GET', '/api/customer/vendors');
@@ -479,7 +574,7 @@ class ApiService {
       'service':       service,
       'totalItems':    totalItems,
       'items':         items,
-      'vendorId':      vendorId ?? _session.vendorId ?? 'vendor01',
+      if (vendorId != null) 'vendorId': vendorId,
       if (customerAddress != null) 'customerAddress': customerAddress,
       if (latitude  != null) 'customerLatitude':  latitude,
       if (longitude != null) 'customerLongitude': longitude,
@@ -580,11 +675,11 @@ class ApiService {
 
   // ── Vendor login (kept for role-select screen compat) ─────────
 
-  static Future<VendorAuth> loginVendor(String vendorId, String password) async {
+  static Future<VendorAuth> loginVendor(String email, String password) async {
     final uri = Uri.parse('$baseUrl/api/auth/login');
     final res = await http.post(uri,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'vendorId': vendorId.trim(), 'password': password}));
+        body: jsonEncode({'email': email.trim(), 'password': password}));
     if (res.statusCode != 200) {
       final b = jsonDecode(res.body) as Map<String, dynamic>;
       throw ApiException(b['message'] as String? ?? 'Login failed', statusCode: res.statusCode);
@@ -592,16 +687,17 @@ class ApiService {
     return VendorAuth.fromJson((jsonDecode(res.body) as Map<String, dynamic>)['data'] as Map<String, dynamic>);
   }
 
-  static Future<VendorAuth> signupVendor(String password, String shopName, String phone, String address) async {
-    final uri = Uri.parse('$baseUrl/api/auth/vendor/signup');
-    final res = await http.post(uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'password': password, 'shopName': shopName, 'phone': phone, 'address': address}));
-    if (res.statusCode != 200) {
-      final b = jsonDecode(res.body) as Map<String, dynamic>;
-      throw ApiException(b['message'] as String? ?? 'Signup failed', statusCode: res.statusCode);
-    }
-    return VendorAuth.fromJson((jsonDecode(res.body) as Map<String, dynamic>)['data'] as Map<String, dynamic>);
+  static Future<VendorAuth> signupVendor(String email, String password, String shopName, String phone, String address, {double? latitude, double? longitude}) async {
+    final res = await instance._request('POST', '/api/auth/vendor/signup', body: {
+      'email': email,
+      'password': password,
+      'shopName': shopName,
+      'phone': phone,
+      'address': address,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+    });
+    return VendorAuth.fromJson(res['data'] as Map<String, dynamic>);
   }
 
   static Future<DeliveryAuth> loginDeliveryBoy(String login, String password) async {
@@ -613,8 +709,10 @@ class ApiService {
       final b = jsonDecode(res.body) as Map<String, dynamic>;
       throw ApiException(b['message'] as String? ?? 'Login failed', statusCode: res.statusCode);
     }
-    return DeliveryAuth.fromJson(
+    final auth = DeliveryAuth.fromJson(
         (jsonDecode(res.body) as Map<String, dynamic>)['data'] as Map<String, dynamic>);
+    await instance._deliverySession.save(auth);
+    return auth;
   }
 
   static Future<DeliveryAuth> signupDeliveryBoy(
@@ -627,8 +725,47 @@ class ApiService {
       final b = jsonDecode(res.body) as Map<String, dynamic>;
       throw ApiException(b['message'] as String? ?? 'Signup failed', statusCode: res.statusCode);
     }
-    return DeliveryAuth.fromJson(
+    final auth = DeliveryAuth.fromJson(
         (jsonDecode(res.body) as Map<String, dynamic>)['data'] as Map<String, dynamic>);
+    await instance._deliverySession.save(auth);
+    return auth;
+  }
+
+  static Future<void> uploadDriverKyc({
+    required String aadharFrontBase64,
+    required String aadharBackBase64,
+    required String selfieBase64,
+    required String aadharNumber,
+  }) async {
+    final uri = Uri.parse('$_kDefaultBase/api/driver/kyc-upload');
+    final res = await http.post(uri,
+        headers: {
+          'Content-Type': 'application/json',
+          if (instance._deliverySession.token != null) 'Authorization': 'Bearer ${instance._deliverySession.token}',
+        },
+        body: jsonEncode({
+          'aadhar_front': aadharFrontBase64,
+          'aadhar_back': aadharBackBase64,
+          'selfie': selfieBase64,
+          'aadhar_number': aadharNumber,
+        }));
+    if (res.statusCode != 200) {
+      final b = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(b['message'] as String? ?? 'Upload failed', statusCode: res.statusCode);
+    }
+
+    if (instance.currentDeliveryAuth != null) {
+      final current = instance.currentDeliveryAuth!;
+      final updated = DeliveryAuth(
+        token: current.token,
+        deliveryId: current.deliveryId,
+        name: current.name,
+        email: current.email,
+        phone: current.phone,
+        kycStatus: 'submitted',
+      );
+      await instance._deliverySession.save(updated);
+    }
   }
 
   // ── Legacy static helpers (keeps existing main.dart calls working) ──
@@ -669,17 +806,28 @@ class ApiService {
   static OrderStatus mapBackendStatus(String backendStatus) {
     switch (backendStatus) {
       case 'received': return OrderStatus.pickedUp;
+      case 'accepted': 
       case 'washing':
       case 'drying': return OrderStatus.inLaundry;
-      case 'readyForDelivery': return OrderStatus.outForDelivery;
-      case 'handedToDelivery': return OrderStatus.delivered;
+      case 'readyForDelivery': return OrderStatus.readyForDelivery;
+      case 'handedToDelivery': return OrderStatus.outForDelivery;
+      case 'delivered': return OrderStatus.delivered;
       default: return OrderStatus.pending;
     }
   }
 
-  Future<List<DeliveryOrder>> fetchVendorOrders() async {
-    final res = await _request('GET', '/api/orders');
-    final list = res['data'] as List<dynamic>;
+  OrderStatus _determineDriverStatus(Map<String, dynamic> map) {
+    String backendStatus = map['status'] as String;
+    if (backendStatus == 'received') {
+      if (map['pickupVerifiedAt'] == null) {
+        return OrderStatus.pending;
+      }
+      return OrderStatus.pickedUp;
+    }
+    return mapBackendStatus(backendStatus);
+  }
+
+  List<DeliveryOrder> _parseDeliveryOrderList(List<dynamic> list) {
     return list.map((e) {
       final map = e as Map<String, dynamic>;
       return DeliveryOrder(
@@ -690,11 +838,18 @@ class ApiService {
         token: map['token'] as String,
         pickupOtp: (map['pickupOtp'] as String?) ?? '1234',
         deliveryOtp: (map['deliveryOtp'] as String?) ?? '1234',
+        vendorDropoffOtp: (map['vendorDropoffOtp'] as String?) ?? '1234',
+        vendorDispatchOtp: (map['vendorDispatchOtp'] as String?) ?? '1234',
         totalItems: (map['totalItems'] as num).toInt(),
         service: map['service'] as String,
-        status: mapBackendStatus(map['status'] as String),
+        status: _determineDriverStatus(map),
       );
     }).toList();
+  }
+
+  Future<List<DeliveryOrder>> fetchVendorOrders() async {
+    final res = await _request('GET', '/api/orders');
+    return _parseDeliveryOrderList(res['data'] as List<dynamic>);
   }
 
   Future<void> advanceVendorOrderStatusTo(String id, OrderStatus target) async {
@@ -703,15 +858,88 @@ class ApiService {
     
     if (target == OrderStatus.inLaundry) {
       if (currentStatus == 'received') {
-        await _request('PATCH', '/api/orders/$id/status');
+        await _request('PATCH', '/api/orders/$id/status'); // received -> accepted
+        await _request('PATCH', '/api/orders/$id/status'); // accepted -> washing
+      } else if (currentStatus == 'accepted') {
+        await _request('PATCH', '/api/orders/$id/status'); // accepted -> washing
       }
-    } else if (target == OrderStatus.outForDelivery) {
-      if (currentStatus == 'washing') {
-        await _request('PATCH', '/api/orders/$id/status'); // to drying
-        await _request('PATCH', '/api/orders/$id/status'); // to readyForDelivery
+    } else if (target == OrderStatus.readyForDelivery) {
+      if (currentStatus == 'accepted') {
+        await _request('PATCH', '/api/orders/$id/status'); // accepted -> washing
+        await _request('PATCH', '/api/orders/$id/status'); // washing -> drying
+        await _request('PATCH', '/api/orders/$id/status'); // drying -> readyForDelivery
+      } else if (currentStatus == 'washing') {
+        await _request('PATCH', '/api/orders/$id/status'); // washing -> drying
+        await _request('PATCH', '/api/orders/$id/status'); // drying -> readyForDelivery
       } else if (currentStatus == 'drying') {
-        await _request('PATCH', '/api/orders/$id/status'); // to readyForDelivery
+        await _request('PATCH', '/api/orders/$id/status'); // drying -> readyForDelivery
       }
     }
+  }
+
+  // --- Vendor Broadcast ---
+  static Future<List<Map<String, dynamic>>> fetchVendorBroadcastOrders() async {
+    try {
+      final res = await instance._request('GET', '/api/vendor/broadcast-orders');
+      final data = res['data'] as List;
+      return data.cast<Map<String, dynamic>>();
+    } catch (e) {
+      print('Failed to fetch broadcast orders: $e');
+      return [];
+    }
+  }
+
+  static Future<Map<String, dynamic>> acceptVendorBroadcastOrder(String orderId) async {
+    try {
+      final res = await instance._request('POST', '/api/vendor/accept-order', body: {
+        'orderId': orderId,
+      });
+      return {'success': true, 'data': res};
+    } catch (e) {
+      String message = 'Accept failed';
+      if (e is ApiException) {
+      }
+      return {'success': false, 'message': message};
+    }
+  }
+
+  // ── Driver ──────────────────────────────────────────────────────
+  Future<List<DeliveryOrder>> fetchMyRides() async {
+    final res = await _request('GET', '/api/driver/my-rides');
+    return _parseDeliveryOrderList(res['data'] as List<dynamic>);
+  }
+
+  Future<List<DeliveryOrder>> fetchAvailablePickups() async {
+    final res = await _request('GET', '/api/driver/pickups');
+    return _parseDeliveryOrderList(res['data'] as List<dynamic>);
+  }
+
+  Future<List<DeliveryOrder>> fetchAvailableDeliveries() async {
+    final res = await _request('GET', '/api/driver/rides');
+    return _parseDeliveryOrderList(res['data'] as List<dynamic>);
+  }
+
+  Future<void> acceptPickup(String rideId) async {
+    await _request('POST', '/api/driver/accept-pickup', body: {'rideId': rideId});
+  }
+
+  Future<void> acceptRide(String rideId) async {
+    await _request('POST', '/api/driver/accept-ride', body: {'rideId': rideId});
+  }
+
+  Future<void> verifyPickupOtp(String rideId, String otp) async {
+    await _request('POST', '/api/driver/verify-pickup-otp', body: {'rideId': rideId, 'otp': otp});
+  }
+
+  Future<void> verifyVendorDropoffOtp(String rideId, String otp) async {
+    await _request('POST', '/api/driver/verify-vendor-dropoff-otp', body: {'rideId': rideId, 'otp': otp});
+  }
+
+  Future<void> verifyVendorDispatchOtp(String rideId, String otp) async {
+    await _request('POST', '/api/driver/verify-vendor-dispatch-otp', body: {'rideId': rideId, 'otp': otp});
+  }
+
+  Future<void> completeRide(String rideId, String otp) async {
+    await _request('POST', '/api/driver/complete-ride', body: {'rideId': rideId, 'otp': otp});
   }
 }

@@ -9,6 +9,7 @@ import '../../../core/models/laundry_order.dart';
 import '../../../services/api_service.dart';
 import '../controllers/customer_controller.dart';
 import 'customer_home_screen.dart';
+import 'map_location_picker.dart';
 
 // ── PLAN SELECTION ──────────────────────────────────────────────
 class PlanSelectionScreen extends StatefulWidget {
@@ -101,6 +102,7 @@ class _BookScreenState extends State<BookScreen> {
     final ctrl = CustomerController.instance;
     if (ctrl.totalCartItems == 0) { Get.snackbar('Info', 'Select at least one item.', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.orange, colorText: Colors.white); return; }
     if (_pickupSlot.isEmpty) { Get.snackbar('Info', 'Please select a pickup time slot.', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.orange, colorText: Colors.white); return; }
+    if (ctrl.currentLatitude.value == 0.0) { Get.snackbar('Location Required', 'Please fetch your current location for pickup.', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.redAccent, colorText: Colors.white); return; }
 
     setState(() => _isBooking = true);
     try {
@@ -187,6 +189,61 @@ class _BookScreenState extends State<BookScreen> {
               decoration: BoxDecoration(color: kAccentGreen.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)),
               child: Text('Total: ${ctrl.totalCartItems} items', style: const TextStyle(fontWeight: FontWeight.bold, color: kAccentGreen))) : const SizedBox()),
         const SizedBox(height: 20),
+        
+        // ── Location Section ──
+        const Text('Pickup Location', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kPrimaryBlue)),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: kCardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade300)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Obx(() => Text(
+                ctrl.currentAddress.value.isEmpty ? 'Location not fetched yet.' : ctrl.currentAddress.value,
+                style: TextStyle(color: ctrl.currentAddress.value.isEmpty ? Colors.grey : Colors.black87, fontSize: 14),
+              )),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Obx(() => ElevatedButton.icon(
+                      onPressed: ctrl.isFetchingLocation.value ? null : () => ctrl.fetchCurrentLocation(),
+                      icon: ctrl.isFetchingLocation.value 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.my_location, size: 18),
+                      label: const Text('Current'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAccentBlue.withValues(alpha: 0.1),
+                        foregroundColor: kAccentBlue,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    )),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Get.to(() => const MapLocationPickerScreen());
+                      },
+                      icon: const Icon(Icons.map, size: 18),
+                      label: const Text('Map'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAccentGreen.withValues(alpha: 0.1),
+                        foregroundColor: kAccentGreen,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
         const Text('Pickup Time Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kPrimaryBlue)),
         const SizedBox(height: 10),
         Wrap(spacing: 8, runSpacing: 8, children: _slots.map((slot) {

@@ -6,14 +6,15 @@ import 'services/api_service.dart';
 import 'features/customer/controllers/customer_controller.dart';
 import 'features/customer/screens/customer_home_screen.dart';
 import 'features/vendor/screens/vendor_home_screen.dart';
+import 'features/delivery/screens/delivery_home_screen.dart';
+import 'features/delivery/screens/delivery_kyc_screen.dart';
+import 'features/delivery/screens/delivery_kyc_pending_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ApiService.instance.loadSession();
   
-  if (ApiService.instance.isLoggedIn) {
-    Get.put(CustomerController());
-  }
+  Get.put(CustomerController(), permanent: true);
   
   runApp(const RiDealApp());
 }
@@ -45,11 +46,17 @@ class RiDealApp extends StatelessWidget {
           focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: kAccentBlue, width: 2)),
         ),
       ),
-      home: ApiService.instance.isLoggedIn
-          ? const CustomerHomeScreen()
-          : (ApiService.instance.isVendorLoggedIn
-              ? VendorHomeScreen(vendorName: ApiService.instance.currentVendorAuth!.shopName)
-              : const RoleSelectionScreen()),
+      home: ApiService.instance.isDeliveryLoggedIn
+          ? (ApiService.instance.currentDeliveryAuth!.kycStatus == 'pending'
+              ? DeliveryKycScreen(boyName: ApiService.instance.currentDeliveryAuth!.name)
+              : (ApiService.instance.currentDeliveryAuth!.kycStatus == 'submitted'
+                  ? const DeliveryKycPendingScreen()
+                  : DeliveryHomeScreen(boyName: ApiService.instance.currentDeliveryAuth!.name)))
+          : ApiService.instance.isLoggedIn
+              ? const CustomerHomeScreen()
+              : (ApiService.instance.isVendorLoggedIn
+                  ? VendorHomeScreen(vendorName: ApiService.instance.currentVendorAuth!.shopName)
+                  : const RoleSelectionScreen()),
     );
   }
 }

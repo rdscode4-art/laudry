@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
 import '../../../core/models/laundry_order.dart';
@@ -40,6 +42,12 @@ class CustomerController extends GetxController {
 
   // Address State
   final RxList<Map<String, dynamic>> addresses = <Map<String, dynamic>>[].obs;
+
+  // Location State
+  var currentLatitude = RxDouble(0.0);
+  var currentLongitude = RxDouble(0.0);
+  var currentAddress = RxString('');
+  var isFetchingLocation = false.obs;
 
   final RxString referralCode = ''.obs;
 
@@ -136,10 +144,11 @@ class CustomerController extends GetxController {
         customerEmail: session.value?.email ?? '',
         customerPhone: '9876543210', // Still mocked since phone isn't in session yet
         customerAddress: address,
+        latitude: currentLatitude.value != 0.0 ? currentLatitude.value : null,
+        longitude: currentLongitude.value != 0.0 ? currentLongitude.value : null,
         service: selectedService.value.label,
         totalItems: totalCartItems,
         items: itemsMap,
-        vendorId: session.value?.vendorId,
       );
       
       // Clear cart
@@ -261,6 +270,44 @@ class CustomerController extends GetxController {
       Get.snackbar('Success', 'Thank you for your feedback!', backgroundColor: Colors.green, colorText: Colors.white);
     } catch (e) {
       Get.snackbar('Error', 'Failed to submit rating: $e', backgroundColor: Colors.red, colorText: Colors.white);
+    }
+  }
+
+  // ── Location ────────────────────────────────────────────────────
+  Future<void> fetchCurrentLocation() async {
+    isFetchingLocation.value = true;
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw 'Location services are disabled.';
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw 'Location permissions are denied';
+        }
+      }
+      
+      if (permission == LocationPermission.deniedForever) {
+        throw 'Location permissions are permanently denied.';
+      } 
+
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      currentLatitude.value = position.latitude;
+      currentLongitude.value = position.longitude;
+
+      List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks.first;
+        String address = "${place.name}, ${place.subLocality}, ${place.locality}, ${place.postalCode}, ${place.country}";
+        currentAddress.value = address;
+      }
+    } catch (e) {
+      Get.snackbar('Location Error', e.toString(), backgroundColor: Colors.orange, colorText: Colors.white);
+    } finally {
+      isFetchingLocation.value = false;
     }
   }
 }
