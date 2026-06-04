@@ -367,7 +367,7 @@ class _CustomerDeliveryScreenState extends State<CustomerDeliveryScreen> {
         const SizedBox(height: 8), const Text('Your clothes are fresh and clean.', style: TextStyle(color: Colors.grey)),
         const SizedBox(height: 24),
         Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: kCardBg, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 10)]), child: Column(children: [
-          _row('Token', widget.order.token), const Divider(height: 20), _row('Total Items', '${widget.order.totalItems}'), const Divider(height: 20), _row('Service', widget.order.service?.label ?? '-'),
+          _row('Token', widget.order.token), const Divider(height: 20), _row('Total Items', '${widget.order.totalItems}'), const Divider(height: 20), _row('Service', widget.order.service ?? '-'),
         ])),
       ])) : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(gradient: const LinearGradient(colors: [kAccentGreen, Color(0xFF2E7D32)]), borderRadius: BorderRadius.circular(16)), child: const Column(children: [Icon(Icons.local_shipping_outlined, color: Colors.white, size: 40), SizedBox(height: 8), Text('Your clothes are ready!', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)), SizedBox(height: 4), Text('Tap below to confirm delivery.', style: TextStyle(color: Colors.white70, fontSize: 12))])),
