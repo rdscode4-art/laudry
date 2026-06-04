@@ -160,28 +160,56 @@ class _BookScreenState extends State<BookScreen> {
         Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(color: kAccentBlue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
             child: Obx(() => Row(children: [
-              Icon(ctrl.selectedService.value.icon, color: kAccentBlue, size: 18),
+              Icon(Icons.category, color: kAccentBlue, size: 18),
               const SizedBox(width: 8),
-              Text('Service: ${ctrl.selectedService.value.label}', style: const TextStyle(fontWeight: FontWeight.w600, color: kAccentBlue)),
+              Text('Service: ${ctrl.selectedService.value}', style: const TextStyle(fontWeight: FontWeight.w600, color: kAccentBlue)),
             ]))),
         const SizedBox(height: 20),
         const Text('Select Clothes', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kPrimaryBlue)),
         const SizedBox(height: 10),
-        ...ctrl.cartItems.keys.map((cat) {
-          return Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(color: kCardBg, borderRadius: BorderRadius.circular(12),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)]),
-            child: Row(children: [
-              const Icon(Icons.checkroom_outlined, size: 18, color: Colors.grey),
-              const SizedBox(width: 10),
-              Expanded(child: Text(cat, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))),
-              IconButton(onPressed: () => _change(cat, -1), icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 22)),
-              Container(width: 36, alignment: Alignment.center,
-                  child: Obx(() => Text('${ctrl.cartItems[cat]?.value ?? 0}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kPrimaryBlue)))),
-              IconButton(onPressed: () => _change(cat, 1), icon: const Icon(Icons.add_circle_outline, color: kAccentGreen, size: 22)),
-            ]),
+        Obx(() {
+          if (ctrl.dynamicItems.isEmpty) {
+            return const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator()));
+          }
+          final filteredItems = ctrl.dynamicItems.where((i) => i['service'] == ctrl.selectedService.value).toList();
+          if (filteredItems.isEmpty) {
+            return const Padding(padding: EdgeInsets.all(20), child: Text('No items available for this service.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)));
+          }
+          return Column(
+            children: filteredItems.map((item) {
+              final cat = item['name'] as String;
+              final price = item['price'];
+              final imageUrl = item['image_url'] as String?;
+              
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(color: kCardBg, borderRadius: BorderRadius.circular(12),
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)]),
+                child: Row(children: [
+                  if (imageUrl != null && imageUrl.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        '${ApiService.baseUrl}$imageUrl',
+                        width: 32, height: 32, fit: BoxFit.cover,
+                        errorBuilder: (c, e, s) => const Icon(Icons.checkroom_outlined, size: 24, color: Colors.grey),
+                      )
+                    )
+                  else
+                    const Icon(Icons.checkroom_outlined, size: 24, color: Colors.grey),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(cat, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                    Text('₹$price', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  ])),
+                  IconButton(onPressed: () => _change(cat, -1), icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 22)),
+                  Container(width: 36, alignment: Alignment.center,
+                      child: Obx(() => Text('${ctrl.cartItems[cat]?.value ?? 0}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kPrimaryBlue)))),
+                  IconButton(onPressed: () => _change(cat, 1), icon: const Icon(Icons.add_circle_outline, color: kAccentGreen, size: 22)),
+                ]),
+              );
+            }).toList(),
           );
         }),
         Obx(() => ctrl.totalCartItems > 0 ?

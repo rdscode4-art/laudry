@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
+import '../../../services/api_service.dart';
 import '../controllers/customer_controller.dart';
 import '../widgets/customer_shared_widgets.dart';
 
@@ -98,10 +100,49 @@ class InvoiceScreen extends StatelessWidget {
   const InvoiceScreen({super.key, this.orderData});
   @override
   Widget build(BuildContext context) {
-    // For now, mock items if not provided or empty
-    final disp = [const MapEntry('Shirt', 3), const MapEntry('Pant', 2), const MapEntry('Shorts', 3)];
-    const price = 20.0;
-    final sub = disp.fold(0.0, (s, e) => s + e.value * price);
+    final rawItemsJson = orderData?['items_json'] ?? orderData?['items'] ?? '{}';
+    Map<String, dynamic> parsedItems = {};
+    if (rawItemsJson is String) {
+      try { parsedItems = jsonDecode(rawItemsJson); } catch (_) {}
+    } else if (rawItemsJson is Map) {
+      parsedItems = Map<String, dynamic>.from(rawItemsJson);
+    }
+    
+    if (parsedItems.isEmpty) {
+      parsedItems = {'Shirt': 3, 'Pant': 2, 'Shorts': 3}; // fallback mock if empty
+    }
+    
+    final dynItems = CustomerController.instance.dynamicItems;
+    
+    double sub = 0.0;
+    final itemRows = parsedItems.entries.map((e) {
+      final name = e.key;
+      final quantity = (e.value as num).toInt();
+      final match = dynItems.firstWhere((element) => element['name'] == name, orElse: () => {'price': 20.0});
+      final price = (match['price'] as num).toDouble();
+      final imageUrl = match['image_url'] as String?;
+      final lineTotal = quantity * price;
+      sub += lineTotal;
+      return Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(children: [
+        if (imageUrl != null && imageUrl.isNotEmpty)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Image.network(
+              '${ApiService.baseUrl}$imageUrl',
+              width: 16, height: 16, fit: BoxFit.cover,
+              errorBuilder: (c, e, s) => const Icon(Icons.checkroom_outlined, size: 14, color: Colors.grey),
+            )
+          )
+        else
+          const Icon(Icons.checkroom_outlined, size: 14, color: Colors.grey), 
+        const SizedBox(width: 8),
+        Expanded(child: Text(name, style: const TextStyle(fontSize: 13))),
+        Text('$quantity × ₹${price.toStringAsFixed(0)}', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+        const SizedBox(width: 12),
+        Text('₹${lineTotal.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600, color: kPrimaryBlue)),
+      ]));
+    }).toList();
+
     final tax = sub * 0.05; final total = sub + tax;
     return Scaffold(
       appBar: AppBar(title: const Text('Invoice'), actions: [IconButton(icon: const Icon(Icons.share_outlined), onPressed: () => Get.snackbar('Shared', 'Invoice shared', snackPosition: SnackPosition.BOTTOM, backgroundColor: kAccentBlue, colorText: Colors.white))]),
@@ -123,13 +164,7 @@ class InvoiceScreen extends StatelessWidget {
         const Divider(height: 24),
         const Text('Items', style: TextStyle(fontWeight: FontWeight.bold, color: kPrimaryBlue)),
         const SizedBox(height: 10),
-        ...disp.map((e) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(children: [
-          const Icon(Icons.checkroom_outlined, size: 14, color: Colors.grey), const SizedBox(width: 8),
-          Expanded(child: Text(e.key, style: const TextStyle(fontSize: 13))),
-          Text('${e.value} × ₹${price.toStringAsFixed(0)}', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-          const SizedBox(width: 12),
-          Text('₹${(e.value * price).toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w600, color: kPrimaryBlue)),
-        ]))),
+        ...itemRows,
         const Divider(height: 20),
         _billRow('Subtotal', '₹${sub.toStringAsFixed(0)}'),
         _billRow('GST (5%)', '₹${tax.toStringAsFixed(0)}'),

@@ -5,7 +5,7 @@ import '../constants/enums.dart';
 class LaundryOrder {
   String name = ''; String email = ''; String phone = '';
   String address = ''; String city = ''; String pincode = '';
-  Map<String, dynamic>? plan; ServiceType? service;
+  Map<String, dynamic>? plan; String? service;
   String nearestLaundry = 'Quick Clean Laundry';
   String id = '';
   String pickupOtp = ''; String deliveryOtp = ''; String token = '';

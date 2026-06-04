@@ -24,9 +24,9 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     super.initState();
     _weather = ['Sunny','Rainy','Cloudy','Windy'][Random().nextInt(4)];
     final ctrl = CustomerController.instance;
-    if (ctrl.selectedService.value == ServiceType.laundry) {
+    if (ctrl.selectedService.value == 'Laundry') {
       if (_weather == 'Rainy' || _weather == 'Cloudy') {
-        ctrl.selectedService.value = ServiceType.dryCleaner;
+        ctrl.selectedService.value = 'Dry Cleaner';
       }
     }
   }
@@ -63,7 +63,7 @@ class _CustHomeTab extends StatefulWidget {
   @override State<_CustHomeTab> createState() => _CustHomeTabState();
 }
 class _CustHomeTabState extends State<_CustHomeTab> {
-  ServiceType get _rec => (widget.weather == 'Rainy' || widget.weather == 'Cloudy') ? ServiceType.dryCleaner : ServiceType.laundry;
+  String get _rec => (widget.weather == 'Rainy' || widget.weather == 'Cloudy') ? 'Dry Cleaner' : 'Laundry';
   @override
   Widget build(BuildContext context) {
     final ctrl = CustomerController.instance;
@@ -116,27 +116,57 @@ class _CustHomeTabState extends State<_CustHomeTab> {
         // Service selection
         const Text('Choose Service', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kPrimaryBlue)),
         const SizedBox(height: 10),
-        Obx(() => Row(children: ServiceType.values.map((s) {
-          final active = ctrl.selectedService.value == s;
-          return Expanded(child: GestureDetector(
-            onTap: () { ctrl.selectedService.value = s; widget.onRefresh(); },
-            child: AnimatedContainer(duration: const Duration(milliseconds: 200), margin: const EdgeInsets.symmetric(horizontal: 5), padding: const EdgeInsets.symmetric(vertical: 20),
-              decoration: BoxDecoration(color: active ? kAccentBlue : kCardBg, borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: active ? kAccentBlue : Colors.grey.shade200, width: 2),
-                  boxShadow: [BoxShadow(color: active ? kAccentBlue.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: active ? 14 : 8)]),
-              child: Column(children: [
-                Icon(s.icon, size: 28, color: active ? Colors.white : kAccentBlue),
-                const SizedBox(height: 8),
-                Text(s.label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: active ? Colors.white : kPrimaryBlue)),
-                if (active) ...[const SizedBox(height: 4), Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(10)),
-                    child: const Text('Selected', style: TextStyle(color: Colors.white, fontSize: 10)))],
-              ]),
-            ),
-          ));
-        }).toList())),
+        Obx(() {
+          if (ctrl.dynamicServices.isEmpty) return const Center(child: CircularProgressIndicator());
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: ctrl.dynamicServices.map((srv) {
+                final String srvName = srv['name'] ?? 'Unknown';
+                final String? srvImage = srv['image_url'];
+                final active = ctrl.selectedService.value == srvName;
+                return GestureDetector(
+                  onTap: () { ctrl.selectedService.value = srvName; widget.onRefresh(); },
+                  child: AnimatedContainer(
+                    width: 110,
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 5),
+                    padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: active ? kAccentBlue : kCardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: active ? kAccentBlue : Colors.grey.shade200, width: 2),
+                      boxShadow: [BoxShadow(color: active ? kAccentBlue.withOpacity(0.3) : Colors.black.withOpacity(0.05), blurRadius: active ? 14 : 8)]
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (srvImage != null && srvImage.isNotEmpty)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              '${ApiService.baseUrl}$srvImage',
+                              width: 32, height: 32, fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Icon(Icons.category, size: 28, color: active ? Colors.white : kAccentBlue),
+                            )
+                          )
+                        else
+                          Icon(Icons.category, size: 28, color: active ? Colors.white : kAccentBlue),
+                        const SizedBox(height: 8),
+                        Text(srvName, textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: active ? Colors.white : kPrimaryBlue)),
+                        if (active) ...[const SizedBox(height: 4), Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(10)),
+                            child: const Text('Selected', style: TextStyle(color: Colors.white, fontSize: 10)))],
+                      ]
+                    )
+                  )
+                );
+              }).toList()
+            )
+          );
+        }),
         const SizedBox(height: 16),
-        _infoCard2(Icons.wb_sunny_outlined, kOrange, "Today: ${widget.weather}", 'Recommended: ${_rec.label}', widget.weather),
+        _infoCard2(Icons.wb_sunny_outlined, kOrange, "Today: ${widget.weather}", 'Recommended: $_rec', widget.weather),
         const SizedBox(height: 10),
         _infoCard2(Icons.location_on, kAccentGreen, 'Nearest Laundry', 'Quick Clean Laundry', '0.5 km'),
         const SizedBox(height: 24),

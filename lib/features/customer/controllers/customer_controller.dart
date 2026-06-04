@@ -32,11 +32,12 @@ class CustomerController extends GetxController {
 
   // Active Booking State
   final Rx<Map<String, dynamic>?> selectedPlan = Rx<Map<String, dynamic>?>(null);
-  final Rx<ServiceType> selectedService = ServiceType.laundry.obs;
-  final Map<String, RxInt> cartItems = {
-    'Shirt': 0.obs, 'Pant': 0.obs, 'Saree': 0.obs, 'Shorts': 0.obs,
-    'T-Shirt': 0.obs, 'Kurta': 0.obs, 'Blazer': 0.obs, 'Suit': 0.obs
-  };
+  final RxString selectedService = 'Laundry'.obs;
+  // Dynamic Items & Services State
+  final RxList<Map<String, dynamic>> dynamicServices = <Map<String, dynamic>>[].obs;
+  final RxList<Map<String, dynamic>> dynamicItems = <Map<String, dynamic>>[].obs;
+  
+  final Map<String, RxInt> cartItems = <String, RxInt>{}.obs;
 
   int get totalCartItems => cartItems.values.fold(0, (v, q) => v + q.value);
 
@@ -76,6 +77,17 @@ class CustomerController extends GetxController {
     fetchComplaints();
     fetchAddresses();
     fetchActiveSubscription();
+    fetchItems();
+    fetchServices();
+  }
+
+  Future<void> fetchServices() async {
+    try {
+      final data = await ApiService.instance.fetchServices();
+      dynamicServices.value = data;
+    } catch (e) {
+      debugPrint('Failed to fetch services: $e');
+    }
   }
 
   Future<void> login(String email, String password) async {
@@ -132,6 +144,21 @@ class CustomerController extends GetxController {
     }
   }
 
+  Future<void> fetchItems() async {
+    try {
+      final items = await ApiService.instance.fetchItems();
+      dynamicItems.assignAll(items);
+      // Initialize cart items for newly fetched items if not already present
+      for (var item in items) {
+        if (!cartItems.containsKey(item['name'])) {
+          cartItems[item['name']] = 0.obs;
+        }
+      }
+    } catch (e) {
+      print('Failed to fetch items: $e');
+    }
+  }
+
   Future<bool> createOrder(String address) async {
     try {
       final itemsMap = <String, int>{};
@@ -146,7 +173,7 @@ class CustomerController extends GetxController {
         customerAddress: address,
         latitude: currentLatitude.value != 0.0 ? currentLatitude.value : null,
         longitude: currentLongitude.value != 0.0 ? currentLongitude.value : null,
-        service: selectedService.value.label,
+        service: selectedService.value,
         totalItems: totalCartItems,
         items: itemsMap,
       );

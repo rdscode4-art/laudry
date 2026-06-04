@@ -491,7 +491,20 @@ class ApiService {
     return decoded;
   }
 
-  // ── Auth ──────────────────────────────────────────────────────
+  // ── Customer Items ──────────────────────────────────────────────
+  Future<List<Map<String, dynamic>>> fetchItems() async {
+    final res = await _request('GET', '/api/customer/items');
+    final data = res['data'] as List<dynamic>? ?? [];
+    return data.map((e) => e as Map<String, dynamic>).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchServices() async {
+    final res = await _request('GET', '/api/customer/services');
+    final data = res['data'] as List<dynamic>? ?? [];
+    return data.map((e) => e as Map<String, dynamic>).toList();
+  }
+
+  // ── Customer Auth ──────────────────────────────────────────────────────
 
   Future<CustomerSession> _signupCustomer(String name, String email, String password, {String? vendorId, String? referredBy}) async {
     final res = await _request('POST', '/api/customer/signup', body: {
