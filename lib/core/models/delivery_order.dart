@@ -2,10 +2,11 @@ import '../constants/enums.dart';
 
 class DeliveryOrder {
   final String id, customerName, customerAddress, customerPhone, token, pickupOtp, deliveryOtp, vendorDropoffOtp, vendorDispatchOtp, service;
+  final double? customerLatitude, customerLongitude, vendorLatitude, vendorLongitude;
   final int totalItems;
   OrderStatus status;
   List<String> pickupPhotos; List<String> deliveryPhotos;
-  DeliveryOrder({required this.id, required this.customerName, required this.customerAddress, required this.customerPhone, required this.token, required this.pickupOtp, required this.deliveryOtp, required this.vendorDropoffOtp, required this.vendorDispatchOtp, required this.totalItems, required this.service, this.status = OrderStatus.pending, List<String>? pickupPhotos, List<String>? deliveryPhotos})
+  DeliveryOrder({required this.id, required this.customerName, required this.customerAddress, required this.customerPhone, required this.token, required this.pickupOtp, required this.deliveryOtp, required this.vendorDropoffOtp, required this.vendorDispatchOtp, required this.totalItems, required this.service, this.customerLatitude, this.customerLongitude, this.vendorLatitude, this.vendorLongitude, this.status = OrderStatus.pending, List<String>? pickupPhotos, List<String>? deliveryPhotos})
       : pickupPhotos = pickupPhotos ?? [], deliveryPhotos = deliveryPhotos ?? [];
 }
 

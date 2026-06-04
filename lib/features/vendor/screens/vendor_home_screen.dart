@@ -56,8 +56,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
 
   List<DeliveryOrder> get _list {
     switch (_tab) {
-      case 0: return _orders.where((o) => o.status == OrderStatus.pickedUp).toList();
-      case 1: return _orders.where((o) => o.status == OrderStatus.inLaundry).toList();
+      case 0: return _orders.where((o) => o.status == OrderStatus.pending || o.status == OrderStatus.pickedUp).toList();
+      case 1: return _orders.where((o) => o.status == OrderStatus.inLaundry || o.status == OrderStatus.readyForDelivery).toList();
       case 2: return _orders.where((o) => o.status == OrderStatus.outForDelivery || o.status == OrderStatus.delivered).toList();
       default: return _orders;
     }
@@ -80,14 +80,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
           Row(children: [
             _badge('Broadcasts', '${_broadcastOrders.length}', Colors.white),
             const SizedBox(width: 10),
-            _badge('Received', '${_orders.where((o) => o.status == OrderStatus.pickedUp).length}', Colors.white),
+            _badge('Incoming', '${_orders.where((o) => o.status == OrderStatus.pending || o.status == OrderStatus.pickedUp).length}', Colors.white),
             const SizedBox(width: 10),
-            _badge('Processing', '${_orders.where((o) => o.status == OrderStatus.inLaundry).length}', Colors.white),
+            _badge('Processing', '${_orders.where((o) => o.status == OrderStatus.inLaundry || o.status == OrderStatus.readyForDelivery).length}', Colors.white),
             const SizedBox(width: 10),
             _badge('Dispatched', '${_orders.where((o) => o.status == OrderStatus.outForDelivery || o.status == OrderStatus.delivered).length}', Colors.white),
           ]),
         ])),        
-        Container(color: kCardBg, child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [_tabBtn('Broadcasts', 3), _tabBtn('Received', 0), _tabBtn('Processing', 1), _tabBtn('Dispatched', 2)]))),
+        Container(color: kCardBg, child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [_tabBtn('Broadcasts', 3), _tabBtn('Incoming', 0), _tabBtn('Processing', 1), _tabBtn('Dispatched', 2)]))),
         Expanded(child: _loading && _orders.isEmpty && _broadcastOrders.isEmpty
             ? const Center(child: CircularProgressIndicator(color: kOrange))
             : RefreshIndicator(

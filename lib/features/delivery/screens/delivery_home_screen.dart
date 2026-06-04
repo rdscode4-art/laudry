@@ -2,10 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
 import '../../../core/models/delivery_order.dart';
 import '../../../services/api_service.dart';
+import '../../role_selection/screens/role_selection_screen.dart';
 import '../widgets/delivery_order_card.dart';
 
 class DeliveryHomeScreen extends StatefulWidget {
@@ -26,7 +28,16 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
   @override
   void initState() {
     super.initState();
+    _loadStatus();
     _fetchData();
+  }
+
+  Future<void> _loadStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    final isOnline = prefs.getBool('driver_is_online') ?? false;
+    if (isOnline) {
+      _toggleStatus(true);
+    }
   }
 
   @override
@@ -39,15 +50,18 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     setState(() => _isOnline = val);
     try {
       await ApiService.updateDriverStatus(val ? 'online' : 'offline');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('driver_is_online', val);
       if (val) {
         _startLocationTracking();
       } else {
         _locationTimer?.cancel();
         _locationTimer = null;
       }
+      _fetchData();
     } catch (e) {
       setState(() => _isOnline = !val);
-      Get.snackbar('Error', 'Could not update status');
+      Get.snackbar('Error', e.toString().replaceAll('Exception: ', ''));
     }
   }
 
@@ -156,7 +170,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       const SizedBox(height: 12), Text(widget.boyName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kPrimaryBlue)),
       const SizedBox(height: 4), const Text('Delivery Partner · RiDeal Laundry India', style: TextStyle(fontSize: 13, color: Colors.grey)),
       const SizedBox(height: 20),
-      OutlinedButton.icon(onPressed: () { Get.back(); Get.back(); }, icon: const Icon(Icons.logout, color: Colors.redAccent), label: const Text('Logout', style: TextStyle(color: Colors.redAccent)), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), side: const BorderSide(color: Colors.redAccent), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
+      OutlinedButton.icon(onPressed: () { ApiService.instance.currentDeliveryAuth = null; Get.offAll(() => RoleSelectionScreen()); }, icon: const Icon(Icons.logout, color: Colors.redAccent), label: const Text('Logout', style: TextStyle(color: Colors.redAccent)), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), side: const BorderSide(color: Colors.redAccent), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
       const SizedBox(height: 8),
     ])));
   }

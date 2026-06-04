@@ -68,21 +68,21 @@ class DeliveryOTPScreen extends StatelessWidget {
               const Text('Your clothes are on the way!', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 20),
               const Text('Pickup OTP', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              const Text('1234', style: TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold, letterSpacing: 8)),
+              Text(orderData?['pickupOtp']?.toString() ?? '1234', style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold, letterSpacing: 8)),
               const SizedBox(height: 16),
               const Text('Delivery OTP', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              const Text('5678', style: TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold, letterSpacing: 8)),
+              Text(orderData?['deliveryOtp']?.toString() ?? '5678', style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold, letterSpacing: 8)),
             ])),
         const SizedBox(height: 20),
         customerCard(child: Column(children: [
           customerInfoRow(Icons.confirmation_number_outlined, 'Token', orderData?['token']?.toString() ?? '4821'),
-          customerInfoRow(Icons.checkroom_outlined, 'Items', '${orderData?['total_items'] ?? 8} clothes'),
+          customerInfoRow(Icons.checkroom_outlined, 'Items', '${orderData?['totalItems'] ?? orderData?['total_items'] ?? 8} clothes'),
           customerInfoRow(Icons.local_laundry_service_outlined, 'Service', orderData?['service'] ?? 'Laundry'),
         ])),
         const Spacer(),
         ElevatedButton.icon(
           onPressed: () {
-            Clipboard.setData(const ClipboardData(text: '5678'));
+            Clipboard.setData(ClipboardData(text: orderData?['deliveryOtp']?.toString() ?? '5678'));
             Get.snackbar('Copied', 'OTP copied!', snackPosition: SnackPosition.BOTTOM, backgroundColor: kAccentGreen, colorText: Colors.white);
           },
           icon: const Icon(Icons.copy), label: const Text('Copy Delivery OTP'),

@@ -401,6 +401,14 @@ class ApiService {
       ? DeliveryAuth(token: _deliverySession.token!, deliveryId: _deliverySession.deliveryId!, name: _deliverySession.name!, email: '', phone: '', kycStatus: _deliverySession.kycStatus!)
       : null;
 
+  set currentDeliveryAuth(DeliveryAuth? d) {
+    if (d == null) {
+      _deliverySession.clear();
+    } else {
+      _deliverySession.save(d);
+    }
+  }
+
   String? get currentEmail  => _session.email;
   String? get currentName   => _session.name;
   String? get currentId     => _session.id;
@@ -716,11 +724,11 @@ class ApiService {
   }
 
   static Future<DeliveryAuth> signupDeliveryBoy(
-      String password, String name, String email, String phone, [String vendorId = 'vendor01']) async {
+      String password, String name, String email, String phone, [String? vendorId]) async {
     final uri = Uri.parse('$baseUrl/api/auth/delivery/signup');
     final res = await http.post(uri,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'password': password, 'name': name, 'email': email, 'phone': phone, 'vendorId': vendorId}));
+        body: jsonEncode({'password': password, 'name': name, 'email': email, 'phone': phone, if (vendorId != null) 'vendorId': vendorId}));
     if (res.statusCode != 200 && res.statusCode != 201) {
       final b = jsonDecode(res.body) as Map<String, dynamic>;
       throw ApiException(b['message'] as String? ?? 'Signup failed', statusCode: res.statusCode);
@@ -842,6 +850,10 @@ class ApiService {
         vendorDispatchOtp: (map['vendorDispatchOtp'] as String?) ?? '1234',
         totalItems: (map['totalItems'] as num).toInt(),
         service: map['service'] as String,
+        customerLatitude: map['customerLatitude'] != null ? (map['customerLatitude'] as num).toDouble() : null,
+        customerLongitude: map['customerLongitude'] != null ? (map['customerLongitude'] as num).toDouble() : null,
+        vendorLatitude: map['vendorLatitude'] != null ? (map['vendorLatitude'] as num).toDouble() : (map['vendor_lat'] != null ? (map['vendor_lat'] as num).toDouble() : null),
+        vendorLongitude: map['vendorLongitude'] != null ? (map['vendorLongitude'] as num).toDouble() : (map['vendor_lon'] != null ? (map['vendor_lon'] as num).toDouble() : null),
         status: _determineDriverStatus(map),
       );
     }).toList();

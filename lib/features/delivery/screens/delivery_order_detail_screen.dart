@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
 import '../../../core/models/delivery_order.dart';
@@ -86,6 +87,19 @@ class _DeliveryOrderDetailScreenState extends State<DeliveryOrderDetailScreen> {
     }
   }
 
+  Future<void> _openMap(double? lat, double? lng) async {
+    if (lat == null || lng == null) {
+      Get.snackbar('Error', 'Location not available for this address.', backgroundColor: Colors.red, colorText: Colors.white);
+      return;
+    }
+    final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      Get.snackbar('Error', 'Could not open map', backgroundColor: Colors.red, colorText: Colors.white);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final o = widget.order;
@@ -93,6 +107,24 @@ class _DeliveryOrderDetailScreenState extends State<DeliveryOrderDetailScreen> {
       appBar: AppBar(title: Text('Order ${o.id}')),
       body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(gradient: LinearGradient(colors: [o.status.color.withOpacity(0.8), o.status.color]), borderRadius: BorderRadius.circular(18)), child: Row(children: [Icon(o.status.icon, color: Colors.white, size: 36), const SizedBox(width: 14), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Current Status', style: TextStyle(color: Colors.white70, fontSize: 12)), Text(o.status.label, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))])])),
+        if (o.status == OrderStatus.pending || o.status == OrderStatus.outForDelivery) ...[
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: () => _openMap(o.customerLatitude, o.customerLongitude),
+            icon: const Icon(Icons.navigation_outlined),
+            label: const Text('Navigate to Customer'),
+            style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: Colors.blueAccent),
+          )
+        ],
+        if (o.status == OrderStatus.pickedUp || o.status == OrderStatus.readyForDelivery) ...[
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: () => _openMap(o.vendorLatitude, o.vendorLongitude),
+            icon: const Icon(Icons.store_mall_directory_outlined),
+            label: const Text('Navigate to Vendor'),
+            style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: Colors.orange),
+          )
+        ],
         const SizedBox(height: 16),
         _sec('Customer Details', Icons.person_outline, Column(children: [_row(Icons.person, 'Name', o.customerName), _row(Icons.location_on_outlined, 'Address', o.customerAddress), _row(Icons.phone_outlined, 'Phone', o.customerPhone), _row(Icons.checkroom_outlined, 'Items', '${o.totalItems} clothes'), _row(Icons.local_laundry_service_outlined, 'Service', o.service)])),
         const SizedBox(height: 14),
@@ -107,8 +139,9 @@ class _DeliveryOrderDetailScreenState extends State<DeliveryOrderDetailScreen> {
         if (o.status == OrderStatus.pickedUp) 
           _sec('Verify Vendor Dropoff OTP', Icons.lock_outline, Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Text('Ask vendor for Dropoff OTP and enter below.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)), const SizedBox(height: 12), TextField(controller: _vendorDropoffCtrl, keyboardType: TextInputType.number, maxLength: 4, decoration: const InputDecoration(labelText: 'Enter Dropoff OTP', hintText: 'e.g. 1234', prefixIcon: Icon(Icons.pin_outlined), counterText: '')), const SizedBox(height: 12), ElevatedButton.icon(onPressed: _loading ? null : _verifyVendorDropoff, icon: const Icon(Icons.check_circle_outline), label: _loading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Verify & Dropoff'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: Colors.purple))])),
         
-        // Vendor Processing Wait (Mock transition for demo)
-        if (o.status == OrderStatus.inLaundry) ...[const SizedBox(height: 14), ElevatedButton.icon(onPressed: () => setState(() => widget.order.status = OrderStatus.readyForDelivery), icon: const Icon(Icons.check_circle), label: const Text('(Simulate) Ready for Delivery'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: Colors.grey))],
+        // Vendor Processing Wait
+        if (o.status == OrderStatus.inLaundry) 
+          Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.purple.withOpacity(0.1), borderRadius: BorderRadius.circular(14)), child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.hourglass_top, color: Colors.purple), SizedBox(width: 8), Expanded(child: Text('Order is being processed by the vendor. Waiting for it to be ready.', style: TextStyle(color: Colors.purple, fontWeight: FontWeight.bold)))])),
         
         // Phase 2: Pickup from Vendor
         if (o.status == OrderStatus.readyForDelivery)

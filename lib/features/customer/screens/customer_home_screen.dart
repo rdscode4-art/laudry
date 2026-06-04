@@ -229,10 +229,10 @@ class _CustOrdersTab extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(o['id'] as String, style: const TextStyle(fontWeight: FontWeight.bold, color: kPrimaryBlue, fontSize: 14)),
-              Text('${o['total_items']} items', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+              Text('${o['totalItems'] ?? 0} items', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
             ])),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('₹${o['base_amount'] ?? 0}', style: const TextStyle(fontWeight: FontWeight.bold, color: kPrimaryBlue)),
+              Text('₹${o['baseAmount'] ?? 0}', style: const TextStyle(fontWeight: FontWeight.bold, color: kPrimaryBlue)),
               Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(color: kAccentGreen.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
                   child: Text(o['status'] as String, style: const TextStyle(fontSize: 10, color: kAccentGreen, fontWeight: FontWeight.w600))),
