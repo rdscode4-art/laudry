@@ -1,4 +1,4 @@
-package com.example.rideal_laundry
+package com.rds.rideallaundry
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -98,15 +98,220 @@ class _BookScreenState extends State<BookScreen> {
   void _change(String k, int d) => CustomerController.instance.cartItems[k]?.value = max(0, (CustomerController.instance.cartItems[k]?.value ?? 0) + d);
   Future<void> _pick() async { final imgs = await _picker.pickMultiImage(imageQuality: 70); if (imgs.isNotEmpty) setState(() => _uploadImages.addAll(imgs)); }
 
+  void _showAddressSelection() {
+    final ctrl = CustomerController.instance;
+    Get.bottomSheet(
+      Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Select Address', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: kPrimaryBlue)),
+            const SizedBox(height: 16),
+            Obx(() {
+              if (ctrl.addresses.isEmpty) {
+                return const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: Text('No saved addresses.', style: TextStyle(color: Colors.grey))));
+              }
+              return Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: ctrl.addresses.length,
+                  itemBuilder: (ctx, i) {
+                    final addr = ctrl.addresses[i];
+                    final sel = ctrl.selectedAddress.value != null && ctrl.selectedAddress.value!['id'] == addr['id'];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(addr['label'] == 'Home' ? Icons.home_outlined : Icons.work_outline, color: sel ? kAccentBlue : Colors.grey),
+                      title: Text(addr['label'], style: TextStyle(fontWeight: FontWeight.bold, color: sel ? kAccentBlue : Colors.black87)),
+                      subtitle: Text(addr['address'], style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                      trailing: sel ? const Icon(Icons.check_circle, color: kAccentBlue) : null,
+                      onTap: () {
+                        ctrl.selectedAddress.value = addr;
+                        Get.back();
+                      },
+                    );
+                  },
+                ),
+              );
+            }),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () {
+                Get.back();
+                _showAddAddressForm();
+              },
+              icon: const Icon(Icons.add_location_alt_outlined),
+              label: const Text('Add New Address'),
+              style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: kAccentGreen),
+            )
+          ],
+        ),
+      ),
+      isScrollControlled: true,
+    );
+  }
+
+  void _showAddAddressForm() {
+    final ctrl = CustomerController.instance;
+    ctrl.currentLatitude.value = 0.0;
+    ctrl.currentLongitude.value = 0.0;
+    ctrl.currentAddress.value = '';
+    
+    final lc = TextEditingController();
+    final flatC = TextEditingController();
+    final streetC = TextEditingController();
+    final landmarkC = TextEditingController();
+    final pincodeC = TextEditingController();
+    
+    Get.bottomSheet(
+      StatefulBuilder(builder: (context, setModalState) {
+        final ctrl = CustomerController.instance;
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Add New Address', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: kPrimaryBlue)),
+              const SizedBox(height: 16),
+              
+              // ── Location Fetching ──
+              const Text('Step 1: Fetch Coordinates (Required)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Obx(() => ElevatedButton.icon(
+                      onPressed: ctrl.isFetchingLocation.value ? null : () async {
+                        await ctrl.fetchCurrentLocation();
+                        setModalState(() {
+                          if (ctrl.currentAddress.value.isNotEmpty) {
+                            streetC.text = ctrl.currentAddress.value; // pre-fill
+                          }
+                        });
+                      },
+                      icon: ctrl.isFetchingLocation.value 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.my_location, size: 18),
+                      label: const Text('Current Location'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAccentBlue.withValues(alpha: 0.1),
+                        foregroundColor: kAccentBlue,
+                        elevation: 0,
+                      ),
+                    )),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        await Get.to(() => const MapLocationPickerScreen());
+                        setModalState(() {
+                          if (ctrl.currentAddress.value.isNotEmpty) {
+                            streetC.text = ctrl.currentAddress.value; // pre-fill
+                          }
+                        });
+                      },
+                      icon: const Icon(Icons.map, size: 18),
+                      label: const Text('Choose on Map'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAccentGreen.withValues(alpha: 0.1),
+                        foregroundColor: kAccentGreen,
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Obx(() => ctrl.currentLatitude.value != 0.0 
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 8), 
+                    child: Text('✅ Coordinates captured', style: TextStyle(color: Colors.green.shade700, fontSize: 12, fontWeight: FontWeight.bold))
+                  )
+                : const Padding(
+                    padding: EdgeInsets.only(top: 8), 
+                    child: Text('❌ Coordinates missing', style: TextStyle(color: Colors.red, fontSize: 12))
+                  )
+              ),
+              const SizedBox(height: 16),
+              
+              // ── Address Fields ──
+              const Text('Step 2: Address Details', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      TextFormField(controller: lc, decoration: const InputDecoration(labelText: 'Label (e.g. Home, Office)', isDense: true)),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(child: TextFormField(controller: flatC, decoration: const InputDecoration(labelText: 'Flat / House No.', isDense: true))),
+                          const SizedBox(width: 12),
+                          Expanded(child: TextFormField(controller: pincodeC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Pincode', isDense: true))),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(controller: streetC, maxLines: 2, decoration: const InputDecoration(labelText: 'Street / Area', isDense: true)),
+                      const SizedBox(height: 12),
+                      TextFormField(controller: landmarkC, decoration: const InputDecoration(labelText: 'Landmark (Optional)', isDense: true)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              ElevatedButton(
+                onPressed: () async {
+                  if (ctrl.currentLatitude.value == 0.0) {
+                    Get.snackbar('Coordinates Required', 'Please use Current Location or Map to fetch coordinates.', backgroundColor: Colors.redAccent, colorText: Colors.white);
+                    return;
+                  }
+                  if (flatC.text.isEmpty || streetC.text.isEmpty || pincodeC.text.isEmpty) {
+                    Get.snackbar('Incomplete', 'Please fill Flat No, Street, and Pincode.', backgroundColor: Colors.orange, colorText: Colors.white);
+                    return;
+                  }
+                  
+                  final fullAddress = '${flatC.text}, ${streetC.text}${landmarkC.text.isNotEmpty ? ' (Near ${landmarkC.text})' : ''}, ${pincodeC.text}';
+                  
+                  Get.back(); // close bottomsheet
+                  Get.dialog(const Center(child: CircularProgressIndicator()), barrierDismissible: false);
+                  final success = await CustomerController.instance.addAddress(lc.text.isEmpty ? 'Other' : lc.text, fullAddress, ctrl.currentLatitude.value, ctrl.currentLongitude.value);
+                  Get.back(); // close loading
+                  
+                  if (success) {
+                    Get.snackbar('Success', 'Address added successfully', backgroundColor: Colors.green, colorText: Colors.white);
+                    if (CustomerController.instance.addresses.isNotEmpty) {
+                       CustomerController.instance.selectedAddress.value = CustomerController.instance.addresses.first;
+                    }
+                  } else {
+                    Get.snackbar('Error', 'Failed to save address', backgroundColor: Colors.red, colorText: Colors.white);
+                  }
+                },
+                style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                child: const Text('Save Address'),
+              )
+            ],
+          ),
+        );
+      }),
+      isScrollControlled: true,
+    );
+  }
+
+
   Future<void> _submit() async {
     final ctrl = CustomerController.instance;
     if (ctrl.totalCartItems == 0) { Get.snackbar('Info', 'Select at least one item.', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.orange, colorText: Colors.white); return; }
     if (_pickupSlot.isEmpty) { Get.snackbar('Info', 'Please select a pickup time slot.', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.orange, colorText: Colors.white); return; }
-    if (ctrl.currentLatitude.value == 0.0) { Get.snackbar('Location Required', 'Please fetch your current location for pickup.', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.redAccent, colorText: Colors.white); return; }
+    if (ctrl.selectedAddress.value == null) { Get.snackbar('Address Required', 'Please select a pickup address.', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.redAccent, colorText: Colors.white); return; }
 
     setState(() => _isBooking = true);
     try {
-      final addressToUse = ctrl.addresses.isNotEmpty ? ctrl.addresses.first['address'] as String : 'No saved address';
+      final addressToUse = ctrl.selectedAddress.value!['address'] as String;
       final success = await ctrl.createOrder(addressToUse);
       if (!mounted) return;
       if (success) {
@@ -227,45 +432,39 @@ class _BookScreenState extends State<BookScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Obx(() => Text(
-                ctrl.currentAddress.value.isEmpty ? 'Location not fetched yet.' : ctrl.currentAddress.value,
-                style: TextStyle(color: ctrl.currentAddress.value.isEmpty ? Colors.grey : Colors.black87, fontSize: 14),
-              )),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Obx(() => ElevatedButton.icon(
-                      onPressed: ctrl.isFetchingLocation.value ? null : () => ctrl.fetchCurrentLocation(),
-                      icon: ctrl.isFetchingLocation.value 
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.my_location, size: 18),
-                      label: const Text('Current'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kAccentBlue.withValues(alpha: 0.1),
-                        foregroundColor: kAccentBlue,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
+              Obx(() {
+                final selected = ctrl.selectedAddress.value;
+                if (selected == null) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text('No address selected.', style: TextStyle(color: Colors.grey, fontSize: 14)),
+                  );
+                }
+                return Row(
+                  children: [
+                    Icon(selected['label'] == 'Home' ? Icons.home_outlined : Icons.work_outline, color: kAccentBlue, size: 24),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(selected['label'] ?? 'Address', style: const TextStyle(fontWeight: FontWeight.bold, color: kPrimaryBlue)),
+                        Text(selected['address'] ?? '', style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+                      ],
                     )),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Get.to(() => const MapLocationPickerScreen());
-                      },
-                      icon: const Icon(Icons.map, size: 18),
-                      label: const Text('Map'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kAccentGreen.withValues(alpha: 0.1),
-                        foregroundColor: kAccentGreen,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
-                  ),
-                ],
+                  ],
+                );
+              }),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _showAddressSelection,
+                icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+                label: const Text('Change / Add Address'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(40),
+                  foregroundColor: kAccentBlue,
+                  side: BorderSide(color: kAccentBlue.withValues(alpha: 0.5)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
               ),
             ],
           ),
@@ -309,6 +508,65 @@ class _BookScreenState extends State<BookScreen> {
                       child: Image.file(File(_uploadImages[i].path), width: 90, height: 90, fit: BoxFit.cover))))),
         ],
         const SizedBox(height: 24),
+
+        const Text('Payment Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kPrimaryBlue)),
+        const SizedBox(height: 10),
+        Obx(() {
+          final total = ctrl.calculateGrandTotal();
+          final subtotal = ctrl.calculateItemSubtotal();
+          final tax = ctrl.calculateTax();
+          final delivery = ctrl.deliveryCharge.value;
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: kCardBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300)),
+            child: Column(
+              children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('Items Subtotal', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                  Text('₹${subtotal.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                ]),
+                const SizedBox(height: 4),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Tax (${ctrl.taxPercentage.value}%)', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                  Text('₹${tax.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                ]),
+                if (delivery > 0) ...[
+                  const SizedBox(height: 4),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    const Text('Delivery Charge', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                    Text('₹${delivery.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                  ]),
+                ],
+                const Divider(height: 16),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('Grand Total', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text('₹${total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kAccentGreen)),
+                ]),
+                const Divider(height: 24),
+                RadioListTile<String>(
+                  title: const Text('Cash on Delivery', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                  value: 'COD',
+                  groupValue: ctrl.selectedPaymentMethod.value,
+                  onChanged: (val) { if (val != null) ctrl.selectedPaymentMethod.value = val; },
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: kAccentBlue,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                ),
+                RadioListTile<String>(
+                  title: const Text('Online Payment (Razorpay)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                  value: 'ONLINE',
+                  groupValue: ctrl.selectedPaymentMethod.value,
+                  onChanged: (val) { if (val != null) ctrl.selectedPaymentMethod.value = val; },
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: kAccentBlue,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                ),
+              ],
+            ),
+          );
+        }),
+        const SizedBox(height: 24),
+
         ElevatedButton(
           onPressed: _isBooking ? null : _submit,
           style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(52)),

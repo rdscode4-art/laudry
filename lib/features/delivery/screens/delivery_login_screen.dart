@@ -3,6 +3,8 @@ import 'package:get/get.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/widgets/shared_widgets.dart';
 import '../../../services/api_service.dart';
+import '../../../services/notification_service.dart';
+import '../../../services/socket_service.dart';
 import 'delivery_home_screen.dart';
 import 'delivery_kyc_screen.dart';
 import 'delivery_kyc_pending_screen.dart';
@@ -63,6 +65,8 @@ class _DeliveryLoginScreenState extends State<DeliveryLoginScreen> {
     try {
       if (_isLogin) {
         final result = await ApiService.loginDeliveryBoy(login, pass);
+        await NotificationService.instance.registerToken('delivery', result.deliveryId);
+        SocketService.instance.connect(result.token);
         if (result.kycStatus == 'pending') {
           Get.off(() => DeliveryKycScreen(boyName: result.name));
         } else if (result.kycStatus == 'submitted') {
@@ -76,6 +80,7 @@ class _DeliveryLoginScreenState extends State<DeliveryLoginScreen> {
         final phone = _phoneCtrl.text.trim();
 
         final result = await ApiService.signupDeliveryBoy(pass, name, email, phone);
+        await NotificationService.instance.registerToken('delivery', result.deliveryId);
         _showMessage('Delivery partner registered successfully. Your ID is ${result.deliveryId}', color: kAccentGreen);
         
         if (result.kycStatus == 'pending') {

@@ -14,7 +14,7 @@ String get _kDefaultBase {
   final env = const String.fromEnvironment('API_BASE_URL', defaultValue: '');
   if (env.isNotEmpty) return env;
   if (kIsWeb) return 'http://localhost:8000';
-  if (defaultTargetPlatform == TargetPlatform.android) return 'http://192.168.1.16:8000';
+  if (defaultTargetPlatform == TargetPlatform.android) return 'http://192.168.1.8:8000';
   return 'http://localhost:8000';
 }
 
@@ -440,12 +440,30 @@ class ApiService {
     await _deliverySession.load();
   }
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        if (_session.token != null) 'Authorization': 'Bearer ${_session.token}',
-        if (_vendorSession.token != null) 'Authorization': 'Bearer ${_vendorSession.token}',
-        if (_deliverySession.token != null) 'Authorization': 'Bearer ${_deliverySession.token}',
-      };
+  Map<String, String> _getHeaders(String path) {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+
+    if (path.startsWith('/api/customer') && _session.token != null) {
+      headers['Authorization'] = 'Bearer ${_session.token}';
+    } else if (path.startsWith('/api/vendor') && _vendorSession.token != null) {
+      headers['Authorization'] = 'Bearer ${_vendorSession.token}';
+    } else if (path.startsWith('/api/driver') && _deliverySession.token != null) {
+      headers['Authorization'] = 'Bearer ${_deliverySession.token}';
+    } else if (path.startsWith('/api/orders') && _vendorSession.token != null) {
+      headers['Authorization'] = 'Bearer ${_vendorSession.token}';
+    } else {
+      if (_session.token != null) {
+        headers['Authorization'] = 'Bearer ${_session.token}';
+      } else if (_vendorSession.token != null) {
+        headers['Authorization'] = 'Bearer ${_vendorSession.token}';
+      } else if (_deliverySession.token != null) {
+        headers['Authorization'] = 'Bearer ${_deliverySession.token}';
+      }
+    }
+    return headers;
+  }
 
   Future<Map<String, dynamic>> _request(
     String method,
@@ -457,15 +475,19 @@ class ApiService {
     if (query != null && query.isNotEmpty) uri = uri.replace(queryParameters: query);
 
     http.Response res;
+    final reqHeaders = _getHeaders(path);
     switch (method) {
       case 'GET':
-        res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 15));
+        res = await http.get(uri, headers: reqHeaders).timeout(const Duration(seconds: 15));
         break;
       case 'POST':
-        res = await http.post(uri, headers: _headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15));
+        res = await http.post(uri, headers: reqHeaders, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15));
         break;
       case 'PATCH':
-        res = await http.patch(uri, headers: _headers, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15));
+        res = await http.patch(uri, headers: reqHeaders, body: jsonEncode(body ?? {})).timeout(const Duration(seconds: 15));
+        break;
+      case 'DELETE':
+        res = await http.delete(uri, headers: reqHeaders).timeout(const Duration(seconds: 15));
         break;
       default:
         throw ApiException('Unsupported method $method');
@@ -504,6 +526,11 @@ class ApiService {
     return data.map((e) => e as Map<String, dynamic>).toList();
   }
 
+  Future<Map<String, dynamic>> fetchPlatformSettings() async {
+    final res = await _request('GET', '/api/customer/settings');
+    return res['data'] as Map<String, dynamic>? ?? {};
+  }
+
   // ── Customer Auth ──────────────────────────────────────────────────────
 
   Future<CustomerSession> _signupCustomer(String name, String email, String password, {String? vendorId, String? referredBy}) async {
@@ -534,7 +561,7 @@ class ApiService {
   static Future<void> updateDriverLocation(double lat, double lng) async {
     final res = await http.put(
       Uri.parse('$_kDefaultBase/api/driver/location'),
-      headers: instance._headers,
+      headers: instance._getHeaders('/api/driver/location'),
       body: jsonEncode({'latitude': lat, 'longitude': lng}),
     );
     if (res.statusCode != 200) throw Exception(res.body);
@@ -543,7 +570,7 @@ class ApiService {
   static Future<void> updateDriverStatus(String status) async {
     final res = await http.post(
       Uri.parse('$_kDefaultBase/api/driver/status'),
-      headers: instance._headers,
+      headers: instance._getHeaders('/api/driver/status'),
       body: jsonEncode({'status': status}),
     );
     if (res.statusCode != 200) throw Exception(res.body);
@@ -566,7 +593,55 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>> fetchDriverDashboardStats() async {
+    final driverId = instance.currentDeliveryAuth?.deliveryId;
+    if (driverId == null) return {};
+    try {
+      final res = await instance._request('GET', '/api/driver/profile/$driverId');
+      final data = res['data'] as Map<String, dynamic>? ?? {};
+      if (data['wallet_balance'] != null) {
+        data['walletBalance'] = data['wallet_balance'];
+      }
+      return data;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> requestDriverPayout(double amount) async {
+    final res = await http.post(
+      Uri.parse('$_kDefaultBase/api/driver/payout/request'),
+      headers: instance._getHeaders('/api/driver/payout/request'),
+      body: jsonEncode({'amount': amount}),
+    );
+    if (res.statusCode != 200) {
+      final b = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(b['message'] as String? ?? 'Payout request failed', statusCode: res.statusCode);
+    }
+  }
+
   // ── Vendor Endpoints ───────────────────────────────────────────────
+
+  static Future<Map<String, dynamic>> fetchVendorProfile() async {
+    final res = await instance._request('GET', '/api/vendor/me');
+    final data = res['data'] as Map<String, dynamic>? ?? {};
+    if (data['wallet_balance'] != null) {
+      data['walletBalance'] = data['wallet_balance'];
+    }
+    return data;
+  }
+
+  static Future<void> requestVendorPayout(double amount) async {
+    final res = await http.post(
+      Uri.parse('$_kDefaultBase/api/vendor/payout/request'),
+      headers: instance._getHeaders('/api/vendor/payout/request'),
+      body: jsonEncode({'amount': amount}),
+    );
+    if (res.statusCode != 200) {
+      final b = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(b['message'] as String? ?? 'Payout request failed', statusCode: res.statusCode);
+    }
+  }
 
   Future<List<VendorInfo>> fetchVendors() async {
     final res = await _request('GET', '/api/customer/vendors');
@@ -587,6 +662,10 @@ class ApiService {
     String? customerAddress,
     double? latitude,
     double? longitude,
+    required double totalAmount,
+    required String paymentMethod,
+    required String paymentStatus,
+    String? paymentId,
   }) async {
     final res = await _request('POST', '/api/customer/orders', body: {
       'customerName':  customerName,
@@ -599,6 +678,10 @@ class ApiService {
       if (customerAddress != null) 'customerAddress': customerAddress,
       if (latitude  != null) 'customerLatitude':  latitude,
       if (longitude != null) 'customerLongitude': longitude,
+      'totalAmount': totalAmount,
+      'paymentMethod': paymentMethod,
+      'paymentStatus': paymentStatus,
+      if (paymentId != null) 'paymentId': paymentId,
     });
     return OrderCreated.fromJson(res['data'] as Map<String, dynamic>);
   }
@@ -665,10 +748,12 @@ class ApiService {
     return (res['data'] as List<dynamic>).map((e) => e as Map<String, dynamic>).toList();
   }
 
-  Future<Map<String, dynamic>> addAddress(String label, String address) async {
+  Future<Map<String, dynamic>> addAddress(String label, String address, double lat, double lng) async {
     final res = await _request('POST', '/api/customer/addresses', body: {
       'label': label,
       'address': address,
+      'latitude': lat,
+      'longitude': lng,
     });
     return res['data'] as Map<String, dynamic>;
   }
@@ -808,6 +893,10 @@ class ApiService {
     String? customerAddress,
     double? latitude,
     double? longitude,
+    required double totalAmount,
+    required String paymentMethod,
+    required String paymentStatus,
+    String? paymentId,
   }) async {
     final o = await instance._createOrder(
       customerName: customerName,
@@ -820,8 +909,60 @@ class ApiService {
       totalItems: totalItems,
       items: items,
       vendorId: vendorId,
+      totalAmount: totalAmount,
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentStatus,
+      paymentId: paymentId,
     );
     return OrderResponse(id: o.id, token: o.token);
+  }
+
+  static Future<void> cancelOrder(String orderId) async {
+    final res = await http.post(
+      Uri.parse('$_kDefaultBase/api/customer/orders/$orderId/cancel'),
+      headers: instance._getHeaders('/api/customer/orders/$orderId/cancel'),
+    );
+    if (res.statusCode != 200) {
+      final b = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(b['message'] as String? ?? 'Cancel failed', statusCode: res.statusCode);
+    }
+  }
+
+  static Future<void> rateOrder(String orderId, int rating, String review) async {
+    final res = await http.post(
+      Uri.parse('$_kDefaultBase/api/customer/orders/$orderId/rate'),
+      headers: instance._getHeaders('/api/customer/orders/$orderId/rate'),
+      body: jsonEncode({'rating': rating, 'review': review}),
+    );
+    if (res.statusCode != 200) {
+      final b = jsonDecode(res.body) as Map<String, dynamic>;
+      throw ApiException(b['message'] as String? ?? 'Rating failed', statusCode: res.statusCode);
+    }
+  }
+
+  static Future<Map<String, dynamic>> createRazorpayOrder(double amount) async {
+    final res = await instance._request('POST', '/api/payment/razorpay/create-order', body: {
+      'amount': amount,
+      'currency': 'INR',
+    });
+    return res['data'] as Map<String, dynamic>;
+  }
+
+  static Future<bool> verifyRazorpayPayment({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+  }) async {
+    try {
+      final res = await instance._request('POST', '/api/payment/razorpay/verify', body: {
+        'razorpay_order_id': razorpayOrderId,
+        'razorpay_payment_id': razorpayPaymentId,
+        'razorpay_signature': razorpaySignature,
+      });
+      return res['success'] == true;
+    } catch (_) {
+      return false;
+    }
   }
 
   static OrderStatus mapBackendStatus(String backendStatus) {
@@ -966,5 +1107,19 @@ class ApiService {
 
   Future<void> completeRide(String rideId, String otp) async {
     await _request('POST', '/api/driver/complete-ride', body: {'rideId': rideId, 'otp': otp});
+  }
+
+  // ── Push Notifications ──────────────────────────────────────────
+  Future<void> registerDeviceToken(String userType, String userId, String token) async {
+    try {
+      await _request('POST', '/api/notifications/device-token', body: {
+        'userType': userType,
+        'userId': userId,
+        'token': token,
+        'platform': defaultTargetPlatform.name,
+      });
+    } catch (e) {
+      print('Failed to register device token: $e');
+    }
   }
 }

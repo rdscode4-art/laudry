@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:geolocator/geolocator.dart';
@@ -7,7 +8,11 @@ import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
 import '../../../core/models/laundry_order.dart';
 import '../../../services/api_service.dart';
+import '../../../services/notification_service.dart';
 import '../../role_selection/screens/role_selection_screen.dart';
+// Razorpay is not supported on web
+import 'package:razorpay_flutter/razorpay_flutter.dart'
+    if (dart.library.html) '../../../core/stubs/razorpay_stub.dart';
 
 class CustomerController extends GetxController {
   static CustomerController get instance => Get.find();
@@ -46,15 +51,30 @@ class CustomerController extends GetxController {
 
   // Location State
   var currentLatitude = RxDouble(0.0);
-  var currentLongitude = RxDouble(0.0);
-  var currentAddress = RxString('');
+  final RxDouble currentLongitude = 0.0.obs;
+  final RxString currentAddress = 'Locating...'.obs;
   var isFetchingLocation = false.obs;
 
+  late Razorpay _razorpay;
+  final RxString selectedPaymentMethod = 'COD'.obs;
+  String _pendingOrderAddress = '';
+
   final RxString referralCode = ''.obs;
+
+  // Platform Pricing State
+  final RxDouble taxPercentage = 5.0.obs;
+  final RxDouble deliveryCharge = 0.0.obs;
 
   @override
   void onInit() {
     super.onInit();
+    if (!kIsWeb) {
+      _razorpay = Razorpay();
+      _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+      _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+      _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    }
+
     fetchPlans(); // Always fetch plans on startup
     if (ApiService.instance.isLoggedIn) {
       // Create session from local stored data
@@ -71,6 +91,12 @@ class CustomerController extends GetxController {
     }
   }
 
+  @override
+  void onClose() {
+    if (!kIsWeb) _razorpay.clear();
+    super.onClose();
+  }
+
   Future<void> loadDashboardData() async {
     await fetchOrders();
     fetchWallet();
@@ -79,6 +105,17 @@ class CustomerController extends GetxController {
     fetchActiveSubscription();
     fetchItems();
     fetchServices();
+    fetchPlatformSettings();
+  }
+
+  Future<void> fetchPlatformSettings() async {
+    try {
+      final settings = await ApiService.instance.fetchPlatformSettings();
+      if (settings['tax_percentage'] != null) taxPercentage.value = (settings['tax_percentage'] as num).toDouble();
+      if (settings['delivery_charge'] != null) deliveryCharge.value = (settings['delivery_charge'] as num).toDouble();
+    } catch (e) {
+      debugPrint('Error fetching platform settings: $e');
+    }
   }
 
   Future<void> fetchServices() async {
@@ -95,6 +132,7 @@ class CustomerController extends GetxController {
       final s = await ApiService.loginCustomer(email, password);
       session.value = s;
       referralCode.value = s.referralCode ?? '';
+      await NotificationService.instance.registerToken('customer', s.id);
       await loadDashboardData();
     } catch (e) {
       Get.snackbar('Login Failed', e.toString(), backgroundColor: Colors.red, colorText: Colors.white);
@@ -107,6 +145,7 @@ class CustomerController extends GetxController {
       final s = await ApiService.signupCustomer(name, email, password, referredBy: referredBy);
       session.value = s;
       referralCode.value = s.referralCode ?? '';
+      await NotificationService.instance.registerToken('customer', s.id);
       await loadDashboardData();
     } catch (e) {
       Get.snackbar('Signup Failed', e.toString(), backgroundColor: Colors.red, colorText: Colors.white);
@@ -159,23 +198,126 @@ class CustomerController extends GetxController {
     }
   }
 
+  double calculateItemSubtotal() {
+    double total = 0;
+    cartItems.forEach((key, val) {
+      if (val.value > 0) {
+        final itemDetails = dynamicItems.firstWhere((e) => e['name'] == key, orElse: () => {});
+        if (itemDetails.isNotEmpty && itemDetails['price'] != null) {
+          total += (itemDetails['price'] as num).toDouble() * val.value;
+        }
+      }
+    });
+    return total;
+  }
+
+  double calculateTax() {
+    return calculateItemSubtotal() * (taxPercentage.value / 100);
+  }
+
+  double calculateGrandTotal() {
+    double subtotal = calculateItemSubtotal();
+    if (subtotal == 0) return 0;
+    return subtotal + calculateTax() + deliveryCharge.value;
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    final success = await ApiService.verifyRazorpayPayment(
+      razorpayOrderId: response.orderId ?? '',
+      razorpayPaymentId: response.paymentId ?? '',
+      razorpaySignature: response.signature ?? '',
+    );
+
+    if (success) {
+      await _submitOrder(_pendingOrderAddress, 'ONLINE', 'paid', response.paymentId);
+      Get.snackbar('Success', 'Payment Successful! Booking Confirmed.', backgroundColor: Colors.green, colorText: Colors.white);
+    } else {
+      Get.snackbar('Error', 'Payment verification failed.', backgroundColor: Colors.red, colorText: Colors.white);
+    }
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    Get.snackbar('Payment Failed', response.message ?? 'Payment was cancelled or failed.', backgroundColor: Colors.red, colorText: Colors.white);
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    Get.snackbar('Wallet', 'External wallet selected: ${response.walletName}');
+  }
+
+  Future<void> initiateOnlinePayment(String address) async {
+    final total = calculateGrandTotal();
+    if (total <= 0) return;
+
+    _pendingOrderAddress = address;
+
+    if (kIsWeb) {
+      Get.snackbar('Not Supported', 'Online payment is not available on web. Please use COD.',
+          backgroundColor: Colors.orange, colorText: Colors.white);
+      return;
+    }
+
+    try {
+      final orderData = await ApiService.createRazorpayOrder(total);
+      final options = {
+        'key': 'rzp_live_RoLpvsh1Qs9Cfs', // Real Key ID
+        'amount': orderData['amount'],
+        'name': 'Rideal Laundry',
+        'description': 'Laundry Service Booking',
+        'order_id': orderData['id'],
+        'prefill': {
+          'contact': '9876543210',
+          'email': session.value?.email ?? '',
+        }
+      };
+      _razorpay.open(options);
+    } catch (e) {
+      Get.snackbar('Error', 'Failed to initialize payment: $e',
+          backgroundColor: Colors.red, colorText: Colors.white);
+    }
+  }
+
   Future<bool> createOrder(String address) async {
+    if (selectedPaymentMethod.value == 'ONLINE') {
+      await initiateOnlinePayment(address);
+      return false; // Dialog will be handled in success listener
+    } else {
+      return await _submitOrder(address, 'COD', 'pending', null);
+    }
+  }
+
+  Future<bool> _submitOrder(String address, String method, String status, String? paymentId) async {
     try {
       final itemsMap = <String, int>{};
       cartItems.forEach((key, val) {
         if (val.value > 0) itemsMap[key] = val.value;
       });
 
+      final total = calculateGrandTotal();
+
+      // Resolve vendorId — use session vendorId if present, else pick first available vendor
+      String? resolvedVendorId = session.value?.vendorId;
+      if (resolvedVendorId == null || resolvedVendorId.isEmpty) {
+        try {
+          final vendors = await ApiService.instance.fetchVendors();
+          if (vendors.isNotEmpty) resolvedVendorId = vendors.first.id;
+        } catch (_) {}
+      }
+
       await ApiService.createOrder(
         customerName: session.value?.name ?? 'Customer',
         customerEmail: session.value?.email ?? '',
-        customerPhone: '9876543210', // Still mocked since phone isn't in session yet
+        customerPhone: '9876543210',
         customerAddress: address,
-        latitude: currentLatitude.value != 0.0 ? currentLatitude.value : null,
-        longitude: currentLongitude.value != 0.0 ? currentLongitude.value : null,
+        latitude: selectedAddress.value?['latitude'] ?? (currentLatitude.value != 0.0 ? currentLatitude.value : null),
+        longitude: selectedAddress.value?['longitude'] ?? (currentLongitude.value != 0.0 ? currentLongitude.value : null),
         service: selectedService.value,
         totalItems: totalCartItems,
         items: itemsMap,
+        vendorId: resolvedVendorId,
+        totalAmount: total,
+        paymentMethod: method,
+        paymentStatus: status,
+        paymentId: paymentId,
       );
       
       // Clear cart
@@ -234,22 +376,27 @@ class CustomerController extends GetxController {
   }
 
   // ── Addresses ───────────────────────────────────────────────────
+  final Rx<Map<String, dynamic>?> selectedAddress = Rx<Map<String, dynamic>?>(null);
+
   Future<void> fetchAddresses() async {
     try {
       final res = await ApiService.instance.fetchAddresses();
       addresses.assignAll(res);
+      if (addresses.isNotEmpty && selectedAddress.value == null) {
+        selectedAddress.value = addresses.first;
+      }
     } catch (e) {
-      print('Failed to fetch addresses: $e');
+      debugPrint('Failed to fetch addresses: $e');
     }
   }
 
-  Future<void> addAddress(String label, String address) async {
+  Future<bool> addAddress(String label, String address, double lat, double lng) async {
     try {
-      final newAddr = await ApiService.instance.addAddress(label, address);
+      final newAddr = await ApiService.instance.addAddress(label, address, lat, lng);
       addresses.insert(0, newAddr);
-      Get.snackbar('Success', 'Address added', backgroundColor: Colors.green, colorText: Colors.white);
+      return true;
     } catch (e) {
-      Get.snackbar('Error', 'Failed to add address', backgroundColor: Colors.red, colorText: Colors.white);
+      return false;
     }
   }
 

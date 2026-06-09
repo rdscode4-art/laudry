@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1070622456974",
+    "project_id": "rideal-laundry",
+    "storage_bucket": "rideal-laundry.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1070622456974:android:57186895761eba61185ddf",
+        "android_client_info": {
+          "package_name": "com.rds.rideallaundry"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCeV8lhg-hUWwG5ge6a47UxcTW2JS_6Mgo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

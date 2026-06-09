@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:geolocator/geolocator.dart';
@@ -7,6 +8,8 @@ import '../../../core/constants/colors.dart';
 import '../../../core/constants/enums.dart';
 import '../../../core/models/delivery_order.dart';
 import '../../../services/api_service.dart';
+import '../../../services/notification_service.dart';
+import '../../../services/socket_service.dart';
 import '../../role_selection/screens/role_selection_screen.dart';
 import '../widgets/delivery_order_card.dart';
 
@@ -15,21 +18,69 @@ class DeliveryHomeScreen extends StatefulWidget {
   const DeliveryHomeScreen({super.key, required this.boyName});
   @override State<DeliveryHomeScreen> createState() => _DeliveryHomeScreenState();
 }
-class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
-  int _tab = 1;
+class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
+    with WidgetsBindingObserver {
+  int _tab = 0;
   bool _loading = false;
   List<DeliveryOrder> _available = [];
   List<DeliveryOrder> _myRides = [];
 
   bool _isOnline = false;
+  double _walletBalance = 0.0;
+  double _totalEarnings = 0.0;
+  double _minWithdraw = 200.0;
   Timer? _locationTimer;
   Position? _lastPosition;
+
+  // ── Sound ──────────────────────────────────────────────────────
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  String? _lastSeenOrderId;
+  bool _isPlayingSound = false;
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _audioPlayer.setReleaseMode(ReleaseMode.release);
+    _connectSocket();
     _loadStatus();
     _fetchData();
+    _startPolling();
+  }
+
+  // ── App lifecycle (RiFresh pattern) ────────────────────────────
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Cancel OS notification sounds + re-check for pending orders
+      NotificationService.instance.stopSound();
+      if (_isOnline) _fetchData();
+    }
+  }
+
+  void _connectSocket() {
+    final token = ApiService.instance.currentDeliveryAuth?.token;
+    if (token != null) {
+      SocketService.instance.connect(token);
+      SocketService.instance.addOrderListener(_onSocketOrderUpdate);
+      SocketService.instance.addNotifListener(_onSocketNotification);
+    }
+  }
+
+  void _onSocketNotification(Map<String, dynamic> notif) {
+    NotificationService.instance.handleSocketNotification(notif);
+  }
+
+  void _onSocketOrderUpdate(Map<String, dynamic> _) {
+    if (mounted) _fetchData();
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted && _isOnline) _fetchData();
+    });
   }
 
   Future<void> _loadStatus() async {
@@ -42,7 +93,13 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pollTimer?.cancel();
     _locationTimer?.cancel();
+    SocketService.instance.removeOrderListener(_onSocketOrderUpdate);
+    SocketService.instance.removeNotifListener(_onSocketNotification);
+    _stopOrderSound();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -57,6 +114,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       } else {
         _locationTimer?.cancel();
         _locationTimer = null;
+        _stopOrderSound(); // stop sound when going offline
       }
       _fetchData();
     } catch (e) {
@@ -104,13 +162,42 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       final pickups = await ApiService.instance.fetchAvailablePickups();
       final deliveries = await ApiService.instance.fetchAvailableDeliveries();
       final myRides = await ApiService.instance.fetchMyRides();
+      final stats = await ApiService.fetchDriverDashboardStats();
+      Map<String, dynamic> settings = {};
+      try {
+        settings = await ApiService.instance.fetchPlatformSettings();
+      } catch (e) {
+        debugPrint('Failed to fetch platform settings: $e');
+      }
       
       if (mounted) {
+        final allAvailable = [...pickups, ...deliveries];
         setState(() {
-          _available = [...pickups, ...deliveries];
+          _available = allAvailable;
           _myRides = myRides;
+          if (stats['totalEarnings'] != null) {
+            _totalEarnings = (stats['totalEarnings'] as num).toDouble();
+          }
+          if (stats['walletBalance'] != null) {
+            _walletBalance = (stats['walletBalance'] as num).toDouble();
+          }
+          if (settings['min_withdraw_driver'] != null) {
+            _minWithdraw = (settings['min_withdraw_driver'] as num).toDouble();
+          }
           _loading = false;
         });
+
+        // Play sound if a new available order arrived and driver is online
+        if (_isOnline && allAvailable.isNotEmpty) {
+          final topOrderId = allAvailable.first.id;
+          if (topOrderId != _lastSeenOrderId) {
+            _lastSeenOrderId = topOrderId;
+            _playOrderSound();
+          }
+        } else if (allAvailable.isEmpty) {
+          _stopOrderSound();
+          _lastSeenOrderId = null;
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -118,6 +205,19 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         Get.snackbar('Error', e.toString());
       }
     }
+  }
+
+  // ── Sound helpers ──────────────────────────────────────────────
+  Future<void> _playOrderSound() async {
+    if (_isPlayingSound) return;
+    _isPlayingSound = true;
+    await _audioPlayer.play(AssetSource('order_sound.mp3'));
+    _audioPlayer.onPlayerComplete.listen((_) => _isPlayingSound = false);
+  }
+
+  Future<void> _stopOrderSound() async {
+    _isPlayingSound = false;
+    await _audioPlayer.stop();
   }
 
   int get _requests => _available.length;
@@ -149,12 +249,38 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
           ]),
           const SizedBox(height: 4), const Text("Here's your delivery dashboard", style: TextStyle(color: Colors.white60, fontSize: 12)),
           const SizedBox(height: 16),
-          Row(children: [_badge('Requests', '$_requests', kOrange), const SizedBox(width: 10), _badge('Active', '$_activeCount', Colors.teal), const SizedBox(width: 10), _badge('Delivered', '$_doneCount', kAccentGreen)]),
+          Row(children: [
+            _badge('Requests', '$_requests', kOrange), 
+            const SizedBox(width: 10), 
+            _badge('Active', '$_activeCount', Colors.teal), 
+            const SizedBox(width: 10), 
+            _badge('Delivered', '$_doneCount', kAccentGreen)
+          ]),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withOpacity(0.2))),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Wallet Balance', style: TextStyle(color: Colors.white60, fontSize: 12)),
+                  Text('₹${_walletBalance.toStringAsFixed(0)}', style: const TextStyle(color: kAccentGreen, fontSize: 24, fontWeight: FontWeight.bold)),
+                ]),
+                ElevatedButton(
+                  onPressed: _walletBalance > 0 ? () => _requestPayout() : null,
+                  style: ElevatedButton.styleFrom(backgroundColor: kAccentGreen, foregroundColor: Colors.white),
+                  child: const Text('Withdraw'),
+                )
+              ]
+            ),
+          ),
         ])),
         Container(color: kCardBg, child: Row(children: [_tabBtn('Available', 0), _tabBtn('Active', 1), _tabBtn('Delivered', 2)])),
         Expanded(child: _loading ? const Center(child: CircularProgressIndicator()) : _list.isEmpty
             ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.inbox_outlined, size: 64, color: Colors.grey.shade300), const SizedBox(height: 12), Text('No orders here', style: TextStyle(color: Colors.grey.shade400, fontSize: 16))]))
-            : RefreshIndicator(onRefresh: _fetchData, child: ListView.builder(padding: const EdgeInsets.all(16), itemCount: _list.length, itemBuilder: (_, i) => DeliveryOrderCard(order: _list[i], onUpdated: _fetchData, isAvailable: _tab == 0)))),
+            : RefreshIndicator(onRefresh: _fetchData, child: ListView.builder(padding: const EdgeInsets.all(16), itemCount: _list.length, itemBuilder: (_, i) => DeliveryOrderCard(order: _list[i], onUpdated: _fetchData, isAvailable: _tab == 0, onAccepted: _tab == 0 ? _stopOrderSound : null)))),
       ]),
     );
   }
@@ -173,5 +299,56 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       OutlinedButton.icon(onPressed: () { ApiService.instance.currentDeliveryAuth = null; Get.offAll(() => RoleSelectionScreen()); }, icon: const Icon(Icons.logout, color: Colors.redAccent), label: const Text('Logout', style: TextStyle(color: Colors.redAccent)), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), side: const BorderSide(color: Colors.redAccent), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
       const SizedBox(height: 8),
     ])));
+  }
+
+  void _requestPayout() {
+    final txt = TextEditingController();
+    Get.dialog(AlertDialog(
+      title: const Text('Request Payout'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: txt,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              hintText: 'Amount (Max ₹${_walletBalance.toStringAsFixed(0)})',
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Minimum withdrawal limit: ₹${_minWithdraw.toStringAsFixed(0)}',
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Get.back(), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () async {
+            final amt = double.tryParse(txt.text) ?? 0.0;
+            if (amt < _minWithdraw) {
+              Get.snackbar('Error', 'Amount must be at least ₹${_minWithdraw.toStringAsFixed(0)}', backgroundColor: Colors.red, colorText: Colors.white);
+              return;
+            }
+            if (amt > _walletBalance) {
+              Get.snackbar('Error', 'Insufficient wallet balance', backgroundColor: Colors.red, colorText: Colors.white);
+              return;
+            }
+            Get.back();
+            try {
+              await ApiService.requestDriverPayout(amt);
+              Get.snackbar('Success', 'Payout requested successfully', backgroundColor: Colors.green, colorText: Colors.white);
+              _fetchData();
+            } catch (e) {
+              Get.snackbar('Error', e.toString(), backgroundColor: Colors.red, colorText: Colors.white);
+            }
+          },
+          child: const Text('Submit'),
+        )
+      ],
+    ));
   }
 }

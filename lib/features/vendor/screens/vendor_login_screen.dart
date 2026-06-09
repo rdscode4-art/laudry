@@ -3,6 +3,8 @@ import 'package:get/get.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/widgets/shared_widgets.dart';
 import '../../../services/api_service.dart';
+import '../../../services/notification_service.dart';
+import '../../../services/socket_service.dart';
 import 'vendor_home_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
@@ -108,6 +110,8 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
       if (_isLogin) {
         final result = await ApiService.loginVendor(email, pass);
         ApiService.instance.currentVendorAuth = result;
+        await NotificationService.instance.registerToken('vendor', result.vendorId);
+        SocketService.instance.connect(result.token);
         Get.off(() => VendorHomeScreen(vendorName: result.shopName));
       } else {
         final shopName = _shopNameCtrl.text.trim();
@@ -122,6 +126,8 @@ class _VendorLoginScreenState extends State<VendorLoginScreen> {
 
         final result = await ApiService.signupVendor(email, pass, shopName, phone, address, latitude: _latitude, longitude: _longitude);
         ApiService.instance.currentVendorAuth = result;
+        await NotificationService.instance.registerToken('vendor', result.vendorId);
+        SocketService.instance.connect(result.token);
         _showMessage('Vendor registered successfully. Your Vendor ID is ${result.vendorId}', color: kOrange);
         Get.off(() => VendorHomeScreen(vendorName: result.shopName));
       }

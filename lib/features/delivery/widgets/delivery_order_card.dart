@@ -9,7 +9,8 @@ import '../screens/delivery_order_detail_screen.dart';
 class DeliveryOrderCard extends StatefulWidget {
   final DeliveryOrder order; final VoidCallback onUpdated;
   final bool isAvailable;
-  const DeliveryOrderCard({super.key, required this.order, required this.onUpdated, this.isAvailable = false});
+  final VoidCallback? onAccepted; // called immediately when driver taps Accept
+  const DeliveryOrderCard({super.key, required this.order, required this.onUpdated, this.isAvailable = false, this.onAccepted});
   @override State<DeliveryOrderCard> createState() => _DeliveryOrderCardState();
 }
 
@@ -41,6 +42,7 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
           ElevatedButton(
             onPressed: _loadingAccept ? null : () async {
               setState(() => _loadingAccept = true);
+              widget.onAccepted?.call(); // stop sound immediately
               try {
                 if (order.status == OrderStatus.pending) {
                   await ApiService.instance.acceptPickup(order.id);

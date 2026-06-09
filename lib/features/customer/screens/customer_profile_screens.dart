@@ -5,6 +5,7 @@ import '../../../core/constants/enums.dart';
 import '../controllers/customer_controller.dart';
 import '../widgets/customer_shared_widgets.dart';
 import 'customer_home_screen.dart';
+import 'map_location_picker.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final VoidCallback onSaved;
@@ -76,26 +77,164 @@ class _AddressScreenState extends State<AddressScreen> {
               CustomerController.instance.deleteAddress(addr['id'].toString());
             }),
           ]))),
-          if (_adding) customerCard(child: Column(children: [
-            TextFormField(controller: _lc, decoration: const InputDecoration(labelText: 'Label (Home/Office)', isDense: true)),
-            const SizedBox(height: 10),
-            TextFormField(controller: _ac, maxLines: 2, decoration: const InputDecoration(labelText: 'Full Address', isDense: true)),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(child: OutlinedButton(onPressed: () => setState(() => _adding = false), child: const Text('Cancel'))),
-              const SizedBox(width: 10),
-              Expanded(child: ElevatedButton(onPressed: () {
-                if (_ac.text.isNotEmpty) {
-                  CustomerController.instance.addAddress(_lc.text.isEmpty ? 'Other' : _lc.text, _ac.text);
-                  setState(() { _adding = false; _ac.clear(); _lc.clear(); });
-                }
-              }, child: const Text('Save'))),
-            ]),
-          ])),
-          if (!_adding)
-            ElevatedButton.icon(onPressed: () => setState(() => _adding = true), icon: const Icon(Icons.add_location_alt_outlined), label: const Text('Add New Address'), style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48))),
+          if (_addrs.isEmpty) const Padding(padding: EdgeInsets.all(20), child: Center(child: Text('No saved addresses.', style: TextStyle(color: Colors.grey)))),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () => _showAddAddressForm(),
+            icon: const Icon(Icons.add_location_alt_outlined),
+            label: const Text('Add New Address'),
+            style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          ),
         ]);
       }),
+    );
+  }
+
+  void _showAddAddressForm() {
+    final ctrl = CustomerController.instance;
+    ctrl.currentLatitude.value = 0.0;
+    ctrl.currentLongitude.value = 0.0;
+    ctrl.currentAddress.value = '';
+    
+    final lc = TextEditingController();
+    final flatC = TextEditingController();
+    final streetC = TextEditingController();
+    final landmarkC = TextEditingController();
+    final pincodeC = TextEditingController();
+    
+    Get.bottomSheet(
+      StatefulBuilder(builder: (context, setModalState) {
+        final ctrl = CustomerController.instance;
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Add New Address', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: kPrimaryBlue)),
+              const SizedBox(height: 16),
+              
+              // ── Location Fetching ──
+              const Text('Step 1: Fetch Coordinates (Required)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Obx(() => ElevatedButton.icon(
+                      onPressed: ctrl.isFetchingLocation.value ? null : () async {
+                        await ctrl.fetchCurrentLocation();
+                        setModalState(() {
+                          if (ctrl.currentAddress.value.isNotEmpty) {
+                            streetC.text = ctrl.currentAddress.value; // pre-fill
+                          }
+                        });
+                      },
+                      icon: ctrl.isFetchingLocation.value 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.my_location, size: 18),
+                      label: const Text('Current Location'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAccentBlue.withValues(alpha: 0.1),
+                        foregroundColor: kAccentBlue,
+                        elevation: 0,
+                        padding: EdgeInsets.zero,
+                      ),
+                    )),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        await Get.to(() => const MapLocationPickerScreen());
+                        setModalState(() {
+                          if (ctrl.currentAddress.value.isNotEmpty) {
+                            streetC.text = ctrl.currentAddress.value; // pre-fill
+                          }
+                        });
+                      },
+                      icon: const Icon(Icons.map, size: 18),
+                      label: const Text('Choose on Map'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kAccentGreen.withValues(alpha: 0.1),
+                        foregroundColor: kAccentGreen,
+                        elevation: 0,
+                        padding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Obx(() => ctrl.currentLatitude.value != 0.0 
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 8), 
+                    child: Text('✅ Coordinates captured', style: TextStyle(color: Colors.green.shade700, fontSize: 12, fontWeight: FontWeight.bold))
+                  )
+                : const Padding(
+                    padding: EdgeInsets.only(top: 8), 
+                    child: Text('❌ Coordinates missing', style: TextStyle(color: Colors.red, fontSize: 12))
+                  )
+              ),
+              const SizedBox(height: 16),
+              
+              // ── Address Fields ──
+              const Text('Step 2: Address Details', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      TextFormField(controller: lc, decoration: const InputDecoration(labelText: 'Label (e.g. Home, Office)', isDense: true)),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(child: TextFormField(controller: flatC, decoration: const InputDecoration(labelText: 'Flat / House No.', isDense: true))),
+                          const SizedBox(width: 12),
+                          Expanded(child: TextFormField(controller: pincodeC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Pincode', isDense: true))),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(controller: streetC, maxLines: 2, decoration: const InputDecoration(labelText: 'Street / Area', isDense: true)),
+                      const SizedBox(height: 12),
+                      TextFormField(controller: landmarkC, decoration: const InputDecoration(labelText: 'Landmark (Optional)', isDense: true)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              ElevatedButton(
+                onPressed: () async {
+                  if (ctrl.currentLatitude.value == 0.0) {
+                    Get.snackbar('Coordinates Required', 'Please use Current Location or Map to fetch coordinates.', backgroundColor: Colors.redAccent, colorText: Colors.white);
+                    return;
+                  }
+                  if (flatC.text.isEmpty || streetC.text.isEmpty || pincodeC.text.isEmpty) {
+                    Get.snackbar('Incomplete', 'Please fill Flat No, Street, and Pincode.', backgroundColor: Colors.orange, colorText: Colors.white);
+                    return;
+                  }
+                  
+                  final fullAddress = '${flatC.text}, ${streetC.text}${landmarkC.text.isNotEmpty ? ' (Near ${landmarkC.text})' : ''}, ${pincodeC.text}';
+                  
+                  Get.back(); // close bottomsheet
+                  Get.dialog(const Center(child: CircularProgressIndicator()), barrierDismissible: false);
+                  final success = await CustomerController.instance.addAddress(lc.text.isEmpty ? 'Other' : lc.text, fullAddress, ctrl.currentLatitude.value, ctrl.currentLongitude.value);
+                  Get.back(); // close loading
+                  
+                  if (success) {
+                    Get.snackbar('Success', 'Address added successfully', backgroundColor: Colors.green, colorText: Colors.white);
+                  } else {
+                    Get.snackbar('Error', 'Failed to save address', backgroundColor: Colors.red, colorText: Colors.white);
+                  }
+                },
+                style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                child: const Text('Save Address'),
+              )
+            ],
+          ),
+        );
+      }),
+      isScrollControlled: true,
     );
   }
 }

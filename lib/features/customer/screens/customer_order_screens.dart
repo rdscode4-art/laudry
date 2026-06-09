@@ -13,13 +13,27 @@ class OrderTrackingScreen extends StatelessWidget {
   const OrderTrackingScreen({super.key, this.orderData});
   @override
   Widget build(BuildContext context) {
+    final String status = orderData?['status'] ?? 'pending';
+    final String tracking = orderData?['tracking_status'] ?? 'order_placed';
+    
+    // For a real app, map backend status to steps.
+    final bool isCancelled = status == 'cancelled';
+    final bool isDelivered = status == 'delivered';
+    final bool isCancellable = (status == 'pending' || status == 'received') && tracking == 'order_placed';
+
     final steps = [
       {'label': 'Order Placed',     'sub': 'Your order has been confirmed',       'done': true,  'icon': Icons.check_circle_outline},
-      {'label': 'Picked Up',        'sub': 'Clothes picked up from your address', 'done': true,  'icon': Icons.shopping_bag_outlined},
-      {'label': 'In Laundry',       'sub': 'Being washed at Quick Clean',         'done': true,  'icon': Icons.local_laundry_service},
-      {'label': 'Out for Delivery', 'sub': 'On the way to your address',          'done': false, 'icon': Icons.delivery_dining},
-      {'label': 'Delivered',        'sub': 'Clothes delivered fresh & clean',     'done': false, 'icon': Icons.home_outlined},
+      {'label': 'Picked Up',        'sub': 'Clothes picked up from your address', 'done': status != 'pending' && status != 'received',  'icon': Icons.shopping_bag_outlined},
+      {'label': 'In Laundry',       'sub': 'Being washed at Quick Clean',         'done': ['washing', 'drying', 'readyForDelivery', 'handedToDelivery', 'delivered'].contains(status),  'icon': Icons.local_laundry_service},
+      {'label': 'Out for Delivery', 'sub': 'On the way to your address',          'done': ['handedToDelivery', 'delivered'].contains(status), 'icon': Icons.delivery_dining},
+      {'label': 'Delivered',        'sub': 'Clothes delivered fresh & clean',     'done': isDelivered, 'icon': Icons.home_outlined},
     ];
+
+    if (isCancelled) {
+      steps.clear();
+      steps.add({'label': 'Cancelled', 'sub': 'This order was cancelled.', 'done': true, 'icon': Icons.cancel});
+    }
+
     return Scaffold(
       appBar: AppBar(title: Text('Track ${orderData?['token'] ?? orderData?['id'] ?? "Order"}')),
       body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: Column(children: [
@@ -50,7 +64,104 @@ class OrderTrackingScreen extends StatelessWidget {
             ]))),
           ]);
         }).toList())),
+        if (isCancellable) ...[
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: () => _handleCancel(context, orderData?['id']),
+            icon: const Icon(Icons.cancel_outlined),
+            label: const Text('Cancel Order'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600, minimumSize: const Size.fromHeight(50)),
+          ),
+        ],
+        if (isDelivered) ...[
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: () => _showRatingBottomSheet(context, orderData?['id']),
+            icon: const Icon(Icons.star_outline),
+            label: const Text('Rate Experience'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade600, minimumSize: const Size.fromHeight(50)),
+          ),
+        ]
       ])),
+    );
+  }
+
+  void _handleCancel(BuildContext context, String? orderId) {
+    if (orderId == null) return;
+    showDialog(context: context, builder: (c) => AlertDialog(
+      title: const Text('Cancel Order?'),
+      content: const Text('Are you sure you want to cancel this order? Any paid amount will be refunded to your wallet.'),
+      actions: [
+        TextButton(onPressed: () => Get.back(), child: const Text('No')),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () async {
+            Get.back();
+            try {
+              await ApiService.cancelOrder(orderId);
+              Get.snackbar('Success', 'Order cancelled successfully', backgroundColor: Colors.green, colorText: Colors.white);
+              CustomerController.instance.fetchOrders();
+              Get.back(); // close tracking screen
+            } catch (e) {
+              Get.snackbar('Error', e.toString(), backgroundColor: Colors.red, colorText: Colors.white);
+            }
+          },
+          child: const Text('Yes, Cancel'),
+        ),
+      ],
+    ));
+  }
+
+  void _showRatingBottomSheet(BuildContext context, String? orderId) {
+    if (orderId == null) return;
+    int rating = 5;
+    final txt = TextEditingController();
+    Get.bottomSheet(
+      Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        child: StatefulBuilder(
+          builder: (context, setState) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Rate your experience', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (i) => IconButton(
+                    icon: Icon(i < rating ? Icons.star : Icons.star_border, color: Colors.amber, size: 40),
+                    onPressed: () => setState(() => rating = i + 1),
+                  )),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: txt,
+                  decoration: InputDecoration(
+                    hintText: 'Leave a review (optional)',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () async {
+                    try {
+                      await ApiService.rateOrder(orderId, rating, txt.text);
+                      Get.back();
+                      Get.snackbar('Success', 'Thank you for your rating!', backgroundColor: Colors.green, colorText: Colors.white);
+                    } catch (e) {
+                      Get.snackbar('Error', e.toString(), backgroundColor: Colors.red, colorText: Colors.white);
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: kAccentBlue, minimumSize: const Size.fromHeight(50)),
+                  child: const Text('Submit'),
+                ),
+              ],
+            );
+          }
+        )
+      )
     );
   }
 }
@@ -143,7 +254,9 @@ class InvoiceScreen extends StatelessWidget {
       ]));
     }).toList();
 
-    final tax = sub * 0.05; final total = sub + tax;
+    final tax = sub * (CustomerController.instance.taxPercentage.value / 100);
+    final delivery = CustomerController.instance.deliveryCharge.value;
+    final total = sub + tax + delivery;
     return Scaffold(
       appBar: AppBar(title: const Text('Invoice'), actions: [IconButton(icon: const Icon(Icons.share_outlined), onPressed: () => Get.snackbar('Shared', 'Invoice shared', snackPosition: SnackPosition.BOTTOM, backgroundColor: kAccentBlue, colorText: Colors.white))]),
       body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: customerCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -167,7 +280,8 @@ class InvoiceScreen extends StatelessWidget {
         ...itemRows,
         const Divider(height: 20),
         _billRow('Subtotal', '₹${sub.toStringAsFixed(0)}'),
-        _billRow('GST (5%)', '₹${tax.toStringAsFixed(0)}'),
+        _billRow('Tax (${CustomerController.instance.taxPercentage.value}%)', '₹${tax.toStringAsFixed(0)}'),
+        if (delivery > 0) _billRow('Delivery Charge', '₹${delivery.toStringAsFixed(0)}'),
         const Divider(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           const Text('Total', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kPrimaryBlue)),
