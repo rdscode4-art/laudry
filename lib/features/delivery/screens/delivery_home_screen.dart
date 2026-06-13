@@ -12,6 +12,7 @@ import '../../../services/notification_service.dart';
 import '../../../services/socket_service.dart';
 import '../../role_selection/screens/role_selection_screen.dart';
 import '../widgets/delivery_order_card.dart';
+import 'delivery_order_detail_screen.dart';
 
 class DeliveryHomeScreen extends StatefulWidget {
   final String boyName;
@@ -32,17 +33,32 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
   Timer? _locationTimer;
   Position? _lastPosition;
 
-  // ── Sound ──────────────────────────────────────────────────────
+  // ── Sound & Incoming ───────────────────────────────────────────
   final AudioPlayer _audioPlayer = AudioPlayer();
   String? _lastSeenOrderId;
   bool _isPlayingSound = false;
+  bool _isShowingIncoming = false;
+  final Set<String> _ignoredOrders = {};
   Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _audioPlayer.setReleaseMode(ReleaseMode.release);
+    
+    // Configure to use Alarm stream so it plays loud like notifications
+    _audioPlayer.setAudioContext(const AudioContext(
+      android: AudioContextAndroid(
+        usageType: AndroidUsageType.alarm,
+        contentType: AndroidContentType.sonification,
+        audioFocus: AndroidAudioFocus.gainTransientExclusive,
+      ),
+      iOS: AudioContextIOS(
+        category: AVAudioSessionCategory.playback,
+        options: [AVAudioSessionOptions.mixWithOthers],
+      ),
+    ));
+    _audioPlayer.setReleaseMode(ReleaseMode.loop);
     _connectSocket();
     _loadStatus();
     _fetchData();
@@ -171,7 +187,10 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
       }
       
       if (mounted) {
-        final allAvailable = [...pickups, ...deliveries];
+        final allAvailable = [...pickups, ...deliveries]
+            .where((o) => !_ignoredOrders.contains(o.id))
+            .toList();
+            
         setState(() {
           _available = allAvailable;
           _myRides = myRides;
@@ -187,32 +206,157 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
           _loading = false;
         });
 
-        // Play sound if a new available order arrived and driver is online
+        // Trigger incoming screen if driver is online and new orders exist
         if (_isOnline && allAvailable.isNotEmpty) {
           final topOrderId = allAvailable.first.id;
           if (topOrderId != _lastSeenOrderId) {
             _lastSeenOrderId = topOrderId;
-            _playOrderSound();
+            _triggerIncomingOrder(allAvailable.first);
           }
         } else if (allAvailable.isEmpty) {
-          _stopOrderSound();
-          _lastSeenOrderId = null;
+          if (!_isShowingIncoming) {
+            _stopOrderSound();
+            _lastSeenOrderId = null;
+          }
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
-        Get.snackbar('Error', e.toString());
       }
     }
+  }
+
+  // ── Incoming order flow ────────────────────────────────────────
+  void _triggerIncomingOrder(DeliveryOrder order) {
+    if (_isShowingIncoming) return;
+    _isShowingIncoming = true;
+    NotificationService.instance.stopSound();
+    _playOrderSound();
+
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      _showIncomingSheet(order);
+    });
+  }
+
+  void _showIncomingSheet(DeliveryOrder order) {
+    int countdown = 30;
+    Timer? countdownTimer;
+    final isRide = order.status == OrderStatus.inLaundry || order.status == OrderStatus.readyForDelivery;
+
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          countdownTimer ??= Timer.periodic(const Duration(seconds: 1), (t) {
+            if (countdown <= 1) {
+              t.cancel();
+              if (Navigator.canPop(ctx)) Navigator.pop(ctx);
+            } else {
+              setSheet(() => countdown--);
+            }
+          });
+
+          return Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              LinearProgressIndicator(
+                value: countdown / 30,
+                color: countdown > 15 ? kAccentGreen : countdown > 8 ? kOrange : Colors.red,
+                backgroundColor: Colors.grey.shade200,
+                minHeight: 6,
+                borderRadius: BorderRadius.circular(3),
+              ),
+              const SizedBox(height: 16),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text(isRide ? '🛵 Delivery Ride!' : '📦 Pickup Request!',
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kAccentGreen)),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(20)),
+                  child: Text('$countdown s', style: const TextStyle(fontWeight: FontWeight.bold, color: kAccentGreen)),
+                ),
+              ]),
+              const SizedBox(height: 12),
+              _infoRow(Icons.location_on_outlined, 'Location', order.customerAddress),
+              _infoRow(Icons.checkroom_outlined, 'Items', '${order.totalItems} item(s)'),
+              _infoRow(Icons.local_laundry_service_outlined, 'Service', order.service),
+              const SizedBox(height: 20),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      countdownTimer?.cancel();
+                      _ignoredOrders.add(order.id);
+                      _stopOrderSound();
+                      Navigator.pop(ctx);
+                      _fetchData();
+                    },
+                    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50), side: const BorderSide(color: Colors.redAccent), foregroundColor: Colors.redAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                    child: const Text('Ignore'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      countdownTimer?.cancel();
+                      _stopOrderSound();
+                      Navigator.pop(ctx);
+                      Get.dialog(const Center(child: CircularProgressIndicator()), barrierDismissible: false);
+                      try {
+                        if (order.status == OrderStatus.pending) {
+                          await ApiService.instance.acceptPickup(order.id);
+                        } else {
+                          await ApiService.instance.acceptRide(order.id);
+                        }
+                        Get.back(); // close loading
+                        Get.to(() => DeliveryOrderDetailScreen(order: order))?.then((_) => _fetchData());
+                      } catch (e) {
+                        Get.back(); // close loading
+                        Get.snackbar('Error', e.toString());
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50), backgroundColor: kAccentGreen, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                    child: const Text('Accept Ride', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ]),
+            ]),
+          );
+        });
+      },
+    ).whenComplete(() {
+      countdownTimer?.cancel();
+      _isShowingIncoming = false;
+      _stopOrderSound();
+    });
+  }
+  
+  Widget _infoRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(children: [
+        Icon(icon, size: 18, color: Colors.grey),
+        const SizedBox(width: 8),
+        Text('$label: ', style: const TextStyle(color: Colors.grey)),
+        Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+      ]),
+    );
   }
 
   // ── Sound helpers ──────────────────────────────────────────────
   Future<void> _playOrderSound() async {
     if (_isPlayingSound) return;
     _isPlayingSound = true;
-    await _audioPlayer.play(AssetSource('order_sound.mp3'));
-    _audioPlayer.onPlayerComplete.listen((_) => _isPlayingSound = false);
+    try {
+      await _audioPlayer.play(AssetSource('order_sound.mp3'));
+    } catch (_) {}
   }
 
   Future<void> _stopOrderSound() async {

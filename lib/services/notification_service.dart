@@ -50,7 +50,7 @@ class NotificationService {
     // ── Local notifications (mobile only) ────────────────────────
     if (!kIsWeb) {
       const androidInit =
-          AndroidInitializationSettings('@mipmap/ic_launcher');
+          AndroidInitializationSettings('@mipmap/launcher_icon');
       const iosInit = DarwinInitializationSettings();
       await _localNotif.initialize(
         const InitializationSettings(android: androidInit, iOS: iosInit),

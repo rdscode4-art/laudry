@@ -24,6 +24,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
   int _tab = 0;
   List<DeliveryOrder> _orders = [];
   List<Map<String, dynamic>> _broadcastOrders = [];
+  final Set<String> _ignoredBroadcasts = {};
   bool _loading = false;
   double _walletBalance = 0.0;
   double _minWithdraw = 500.0;
@@ -31,7 +32,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
   // ── Sound (RiFresh pattern) ────────────────────────────────────
   final AudioPlayer _audioPlayer = AudioPlayer();
   String? _lastSeenOrderId;   // tracks last new order id — prevents repeat sound
-  bool _isPlayingSound = false;
   bool _isShowingIncoming = false; // prevents duplicate incoming screen
 
   // ── Polling + Socket ───────────────────────────────────────────
@@ -41,6 +41,19 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // Configure to use Alarm stream so it plays loud like notifications
+    _audioPlayer.setAudioContext(const AudioContext(
+      android: AudioContextAndroid(
+        usageType: AndroidUsageType.alarm,
+        contentType: AndroidContentType.sonification,
+        audioFocus: AndroidAudioFocus.gainTransientExclusive,
+      ),
+      iOS: AudioContextIOS(
+        category: AVAudioSessionCategory.playback,
+        options: [AVAudioSessionOptions.mixWithOthers],
+      ),
+    ));
     _audioPlayer.setReleaseMode(ReleaseMode.loop);
     _fetchOrders();
     _startPolling();
@@ -80,7 +93,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
     final order = payload['order'] as Map<String, dynamic>?;
     final trackingStatus = order?['trackingStatus'] as String? ?? '';
     final isNew = order?['isNew'] == true || trackingStatus == 'order_placed';
-    if (isNew) _triggerIncomingOrder(order);
+    if (isNew) {
+      // Just rely on fetchOrders to pick it up and handle tracking ignored broadcasts
+    }
   }
 
   // ── Polling (10s fallback) ─────────────────────────────────────
@@ -117,7 +132,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
       if (!mounted) return;
       setState(() {
         _orders = list;
-        _broadcastOrders = broadcasts;
+        _broadcastOrders = broadcasts.where((b) => !_ignoredBroadcasts.contains(b['id'])).toList();
         if (profile['walletBalance'] != null) {
           _walletBalance = (profile['walletBalance'] as num).toDouble();
         }
@@ -131,17 +146,32 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
       final incoming = list
           .where((o) => o.status == OrderStatus.pending || o.status == OrderStatus.pickedUp)
           .toList();
-      debugPrint('[Vendor] incoming orders: ${incoming.length}, lastSeenId: $_lastSeenOrderId');
+      
+      String? topId;
+      DeliveryOrder? incomingOrder;
+      Map<String, dynamic>? broadcastOrder;
+      
       if (incoming.isNotEmpty) {
-        final topId = incoming.first.id;
+        topId = incoming.first.id;
+        incomingOrder = incoming.first;
+      } else if (_broadcastOrders.isNotEmpty) {
+        topId = _broadcastOrders.first['id'];
+        broadcastOrder = _broadcastOrders.first;
+      }
+
+      debugPrint('[Vendor] incoming orders: ${incoming.length}, broadcasts: ${_broadcastOrders.length}, lastSeenId: $_lastSeenOrderId');
+      if (topId != null) {
         debugPrint('[Vendor] topId: $topId, match: ${topId != _lastSeenOrderId}');
         if (topId != _lastSeenOrderId) {
           _lastSeenOrderId = topId;
-          _triggerIncomingOrder(null);
+          _triggerIncomingOrder(order: incomingOrder, broadcast: broadcastOrder);
         }
       } else {
-        _stopSound();
-        _lastSeenOrderId = null;
+        // No pending orders — ensure sound and state are reset
+        if (!_isShowingIncoming) {
+          _stopSound();
+          _lastSeenOrderId = null;
+        }
       }
     } catch (e) {
       Get.snackbar('Error', 'Failed to fetch orders: $e',
@@ -154,19 +184,13 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
   }
 
   // ── Incoming order flow (RiFresh IncomingOrderScreen pattern) ──
-  void _triggerIncomingOrder(Map<String, dynamic>? orderData) {
+  void _triggerIncomingOrder({DeliveryOrder? order, Map<String, dynamic>? broadcast}) {
     if (_isShowingIncoming) {
       debugPrint('[Vendor] _triggerIncomingOrder: already showing, skip');
       return;
     }
 
-    final pendingOrders = _orders
-        .where((o) => o.status == OrderStatus.pending || o.status == OrderStatus.pickedUp)
-        .toList();
-    debugPrint('[Vendor] _triggerIncomingOrder: pendingOrders=${pendingOrders.length}');
-    if (pendingOrders.isEmpty) return;
-
-    final order = pendingOrders.first;
+    if (order == null && broadcast == null) return;
 
     _isShowingIncoming = true;
     // Cancel any OS notification sounds first (RiFresh pattern)
@@ -177,13 +201,18 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
     // Show incoming order bottom sheet with countdown
     Future.delayed(const Duration(milliseconds: 300), () {
       if (!mounted) return;
-      _showIncomingSheet(order);
+      _showIncomingSheet(order: order, broadcast: broadcast);
     });
   }
 
-  void _showIncomingSheet(DeliveryOrder order) {
+  void _showIncomingSheet({DeliveryOrder? order, Map<String, dynamic>? broadcast}) {
     int countdown = 30;
     Timer? countdownTimer;
+    
+    final id = order?.id ?? broadcast?['id'] ?? 'Unknown';
+    final items = order?.totalItems ?? broadcast?['totalItems'] ?? 0;
+    final service = order?.service ?? broadcast?['service'] ?? 'Laundry';
+    final isBroadcast = broadcast != null;
 
     showModalBottomSheet(
       context: context,
@@ -217,8 +246,8 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
               ),
               const SizedBox(height: 16),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                const Text('🛍️ New Order!',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kOrange)),
+                Text(isBroadcast ? '📡 Broadcast Order!' : '🛍️ New Order!',
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kOrange)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
@@ -229,17 +258,23 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                 ),
               ]),
               const SizedBox(height: 12),
-              _infoRow(Icons.confirmation_number_outlined, 'Order ID', order.id),
-              _infoRow(Icons.person_outline, 'Customer', order.customerName),
-              _infoRow(Icons.checkroom_outlined, 'Items', '${order.totalItems} item(s)'),
-              _infoRow(Icons.local_laundry_service_outlined, 'Service', order.service),
+              _infoRow(Icons.confirmation_number_outlined, 'Order ID', id),
+              if (!isBroadcast && order != null)
+                _infoRow(Icons.person_outline, 'Customer', order.customerName),
+              _infoRow(Icons.checkroom_outlined, 'Items', '$items item(s)'),
+              _infoRow(Icons.local_laundry_service_outlined, 'Service', service),
               const SizedBox(height: 20),
               Row(children: [
-                // Decline
+                // Ignore
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () {
                       countdownTimer?.cancel();
+                      if (isBroadcast && broadcast != null) {
+                        _ignoredBroadcasts.add(broadcast['id']);
+                        _fetchOrders();
+                      }
+                      _stopSound(); // stop sound immediately on ignore
                       Navigator.pop(ctx);
                     },
                     style: OutlinedButton.styleFrom(
@@ -248,7 +283,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                         foregroundColor: Colors.redAccent,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12))),
-                    child: const Text('Decline'),
+                    child: const Text('Ignore'),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -258,10 +293,14 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                   child: ElevatedButton(
                     onPressed: () {
                       countdownTimer?.cancel();
+                      _stopSound(); // stop sound immediately on accept
                       Navigator.pop(ctx);
-                      // Navigate to order detail
-                      Get.to(() => VendorOrderDetailScreen(order: order))
-                          ?.then((_) => _fetchOrders());
+                      if (isBroadcast) {
+                        _acceptBroadcast(id);
+                      } else if (order != null) {
+                        Get.to(() => VendorOrderDetailScreen(order: order))
+                            ?.then((_) => _fetchOrders());
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
@@ -269,7 +308,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12))),
-                    child: const Text('View Order',
+                    child: const Text('Accept Order',
                         style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
@@ -281,7 +320,7 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
       },
     ).whenComplete(() {
       countdownTimer?.cancel();
-      _stopSound();              // dispose pattern — stop sound when sheet closes
+      _stopSound(); // fallback — stop sound if sheet closed via back gesture/countdown
       _isShowingIncoming = false;
     });
   }
@@ -298,22 +337,22 @@ class _VendorHomeScreenState extends State<VendorHomeScreen>
 
   // ── Sound helpers (RiFresh pattern) ────────────────────────────
   Future<void> _playSound() async {
-    debugPrint('[Vendor] _playSound called, _isPlayingSound=$_isPlayingSound');
-    if (_isPlayingSound) return;
-    _isPlayingSound = true;
+    debugPrint('[Vendor] _playSound called');
     try {
       await _audioPlayer.play(AssetSource('order_sound.mp3'));
       debugPrint('[Vendor] _playSound: playing');
     } catch (e) {
       debugPrint('[Vendor] _playSound error: $e');
-      _isPlayingSound = false;
     }
   }
 
   Future<void> _stopSound() async {
-    if (!_isPlayingSound) return;
-    _isPlayingSound = false;
-    await _audioPlayer.stop();
+    try {
+      await _audioPlayer.stop();
+      debugPrint('[Vendor] _stopSound: stopped');
+    } catch (e) {
+      debugPrint('[Vendor] _stopSound error: $e');
+    }
   }
 
   // ── Accept broadcast order ─────────────────────────────────────
