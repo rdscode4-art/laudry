@@ -561,6 +561,15 @@ class _BookScreenState extends State<BookScreen> {
                   activeColor: kAccentBlue,
                   visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
                 ),
+                RadioListTile<String>(
+                  title: Text('Pay by Wallet (Balance: ₹${ctrl.walletBalance.value.toStringAsFixed(0)})', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                  value: 'WALLET',
+                  groupValue: ctrl.selectedPaymentMethod.value,
+                  onChanged: (val) { if (val != null) ctrl.selectedPaymentMethod.value = val; },
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: kAccentBlue,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                ),
               ],
             ),
           );

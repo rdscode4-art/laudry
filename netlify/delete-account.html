@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delete Account - RiDeal Laundry</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <div class="container header-content">
+            <a href="index.html" class="logo">RiDeal Laundry</a>
+            <nav class="nav-links">
+                <a href="index.html">Home</a>
+                <a href="privacy-policy.html">Privacy Policy</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="card" style="max-width: 600px; margin: 0 auto;">
+            <h1>Delete Account</h1>
+            <p style="color: var(--text-muted); margin-bottom: 2rem;">
+                Submit a request to permanently delete your RiDeal Laundry account and all associated data.
+            </p>
+
+            <div style="background-color: #fee2e2; border-left: 4px solid #ef4444; padding: 1rem; border-radius: 4px; margin-bottom: 2rem;">
+                <h3 style="color: #991b1b; margin-bottom: 0.5rem; font-size: 1rem;">Warning</h3>
+                <p style="color: #991b1b; font-size: 0.9rem; margin: 0;">Account deletion is permanent. Once your account is deleted, your order history, saved addresses, and wallet balance will be permanently erased and cannot be recovered.</p>
+            </div>
+
+            <form id="deleteForm" onsubmit="event.preventDefault(); alert('Your request to delete the account has been submitted. Our team will process it within 7 days.');">
+                <div class="form-group">
+                    <label for="email">Registered Phone Number / Email</label>
+                    <input type="text" id="email" name="email" required placeholder="Enter your registered contact detail">
+                </div>
+                
+                <div class="form-group">
+                    <label for="reason">Reason for leaving (Optional)</label>
+                    <input type="text" id="reason" name="reason" placeholder="Why are you deleting your account?">
+                </div>
+
+                <button type="submit" class="btn btn-danger" style="margin-top: 1rem;">Submit Deletion Request</button>
+            </form>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p class="footer-text">&copy; 2026 RiDeal Laundry. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+</html>

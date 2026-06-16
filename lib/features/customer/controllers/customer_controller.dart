@@ -59,6 +59,9 @@ class CustomerController extends GetxController {
   final RxString selectedPaymentMethod = 'COD'.obs;
   String _pendingOrderAddress = '';
 
+  bool _isRechargingWallet = false;
+  double _rechargeAmount = 0.0;
+
   final RxString referralCode = ''.obs;
 
   // Platform Pricing State
@@ -98,14 +101,16 @@ class CustomerController extends GetxController {
   }
 
   Future<void> loadDashboardData() async {
-    await fetchOrders();
-    fetchWallet();
-    fetchComplaints();
-    fetchAddresses();
-    fetchActiveSubscription();
-    fetchItems();
-    fetchServices();
-    fetchPlatformSettings();
+    await Future.wait([
+      fetchOrders(),
+      fetchWallet(),
+      fetchComplaints(),
+      fetchAddresses(),
+      fetchActiveSubscription(),
+      fetchItems(),
+      fetchServices(),
+      fetchPlatformSettings(),
+    ]);
   }
 
   Future<void> fetchPlatformSettings() async {
@@ -229,14 +234,25 @@ class CustomerController extends GetxController {
     );
 
     if (success) {
-      await _submitOrder(_pendingOrderAddress, 'ONLINE', 'paid', response.paymentId);
-      Get.snackbar('Success', 'Payment Successful! Booking Confirmed.', backgroundColor: Colors.green, colorText: Colors.white);
+      if (_isRechargingWallet) {
+        await rechargeWallet(_rechargeAmount);
+        Get.back(); // close the recharge bottom sheet if open
+        Get.snackbar('Success', 'Wallet recharged successfully!', backgroundColor: Colors.green, colorText: Colors.white);
+      } else {
+        await _submitOrder(_pendingOrderAddress, 'ONLINE', 'paid', response.paymentId);
+        Get.snackbar('Success', 'Payment Successful! Booking Confirmed.', backgroundColor: Colors.green, colorText: Colors.white);
+      }
     } else {
       Get.snackbar('Error', 'Payment verification failed.', backgroundColor: Colors.red, colorText: Colors.white);
     }
+
+    _isRechargingWallet = false;
+    _rechargeAmount = 0.0;
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
+    _isRechargingWallet = false;
+    _rechargeAmount = 0.0;
     Get.snackbar('Payment Failed', response.message ?? 'Payment was cancelled or failed.', backgroundColor: Colors.red, colorText: Colors.white);
   }
 
@@ -277,9 +293,17 @@ class CustomerController extends GetxController {
   }
 
   Future<bool> createOrder(String address) async {
-    if (selectedPaymentMethod.value == 'ONLINE') {
+    final method = selectedPaymentMethod.value;
+    if (method == 'ONLINE') {
       await initiateOnlinePayment(address);
       return false; // Dialog will be handled in success listener
+    } else if (method == 'WALLET') {
+      final total = calculateGrandTotal();
+      if (walletBalance.value < total) {
+        Get.snackbar('Error', 'Insufficient wallet balance. Please recharge your wallet.', backgroundColor: Colors.red, colorText: Colors.white);
+        return false;
+      }
+      return await _submitOrder(address, 'WALLET', 'paid', null);
     } else {
       return await _submitOrder(address, 'COD', 'pending', null);
     }
@@ -324,6 +348,9 @@ class CustomerController extends GetxController {
       for (var val in cartItems.values) { val.value = 0; }
       
       await fetchOrders();
+      if (method == 'WALLET') {
+        await fetchWallet();
+      }
       return true;
     } catch (e) {
       Get.snackbar('Error', 'Failed to create order: $e', backgroundColor: Colors.red, colorText: Colors.white);
@@ -372,6 +399,35 @@ class CustomerController extends GetxController {
       return true;
     } catch (e) {
       return false;
+    }
+  }
+
+  Future<void> initiateWalletRecharge(double amount) async {
+    if (amount <= 0) return;
+    if (kIsWeb) {
+      Get.snackbar('Not Supported', 'Online payment is not available on web.', backgroundColor: Colors.orange, colorText: Colors.white);
+      return;
+    }
+    try {
+      _isRechargingWallet = true;
+      _rechargeAmount = amount;
+      final orderData = await ApiService.createRazorpayOrder(amount);
+      final options = {
+        'key': 'rzp_live_RoLpvsh1Qs9Cfs', // Real Key ID
+        'amount': orderData['amount'],
+        'name': 'Rideal Laundry',
+        'description': 'Wallet Recharge',
+        'order_id': orderData['id'],
+        'prefill': {
+          'contact': '9876543210',
+          'email': session.value?.email ?? '',
+        }
+      };
+      _razorpay.open(options);
+    } catch (e) {
+      _isRechargingWallet = false;
+      _rechargeAmount = 0.0;
+      Get.snackbar('Error', 'Failed to initialize payment: $e', backgroundColor: Colors.red, colorText: Colors.white);
     }
   }
 

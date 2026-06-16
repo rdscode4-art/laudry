@@ -376,20 +376,11 @@ class _WalletRechargeScreenState extends State<WalletRechargeScreen> {
           onPressed: () async {
             final amt = double.tryParse(_cc.text) ?? _sel;
             
-            // Show loading dialog
-            Get.dialog(const Center(child: CircularProgressIndicator()), barrierDismissible: false);
+            // Initiate Razorpay recharge flow
+            await CustomerController.instance.initiateWalletRecharge(amt);
             
-            final success = await CustomerController.instance.rechargeWallet(amt);
-            
-            Get.back(); // close loading
+            // The success handler in controller will update UI and close the bottom sheet.
             widget.onDone(); 
-            Get.back(); // close recharge screen
-            
-            if (success) {
-              Get.snackbar('Success', '₹${amt.toStringAsFixed(0)} added', snackPosition: SnackPosition.BOTTOM, backgroundColor: kAccentGreen, colorText: Colors.white);
-            } else {
-              Get.snackbar('Error', 'Failed to recharge wallet', snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.red, colorText: Colors.white);
-            }
           },
           style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: kAccentGreen),
           child: Text('Recharge ₹${(double.tryParse(_cc.text) ?? _sel).toStringAsFixed(0)}'),

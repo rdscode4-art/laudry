@@ -7,6 +7,7 @@ import '../../../services/api_service.dart';
 import '../controllers/customer_controller.dart';
 import 'customer_booking_screens.dart';
 import 'customer_profile_screens.dart';
+import 'customer_home_screen.dart';
 
 class CustomerAuthScreen extends StatefulWidget {
   const CustomerAuthScreen({super.key});
@@ -35,7 +36,11 @@ class _CustomerAuthScreenState extends State<CustomerAuthScreen> {
       }
 
       if (!mounted) return;
-      Get.offAll(() => const SubscriptionScreen(isFromAuth: true));
+      if (controller.activeSubscription.value != null) {
+        Get.offAll(() => const CustomerHomeScreen());
+      } else {
+        Get.offAll(() => const SubscriptionScreen(isFromAuth: true));
+      }
     } catch (err) {
       final message = err is ApiException ? err.message : 'Unable to connect to backend';
       Get.snackbar('Error', message, snackPosition: SnackPosition.BOTTOM, backgroundColor: Colors.red, colorText: Colors.white);
