@@ -62,6 +62,9 @@ class CustomerController extends GetxController {
   bool _isRechargingWallet = false;
   double _rechargeAmount = 0.0;
 
+  bool _isSubscribing = false;
+  String _pendingPlanCode = '';
+
   final RxString referralCode = ''.obs;
 
   // Platform Pricing State
@@ -238,6 +241,14 @@ class CustomerController extends GetxController {
         await rechargeWallet(_rechargeAmount);
         Get.back(); // close the recharge bottom sheet if open
         Get.snackbar('Success', 'Wallet recharged successfully!', backgroundColor: Colors.green, colorText: Colors.white);
+      } else if (_isSubscribing) {
+        try {
+          await ApiService.instance.purchaseCustomerPlan(_pendingPlanCode);
+          await fetchActiveSubscription();
+          Get.snackbar('Success', 'Subscribed to plan successfully!', backgroundColor: Colors.green, colorText: Colors.white);
+        } catch (e) {
+          Get.snackbar('Error', 'Failed to activate subscription: $e', backgroundColor: Colors.red, colorText: Colors.white);
+        }
       } else {
         await _submitOrder(_pendingOrderAddress, 'ONLINE', 'paid', response.paymentId);
         Get.snackbar('Success', 'Payment Successful! Booking Confirmed.', backgroundColor: Colors.green, colorText: Colors.white);
@@ -248,11 +259,15 @@ class CustomerController extends GetxController {
 
     _isRechargingWallet = false;
     _rechargeAmount = 0.0;
+    _isSubscribing = false;
+    _pendingPlanCode = '';
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
     _isRechargingWallet = false;
     _rechargeAmount = 0.0;
+    _isSubscribing = false;
+    _pendingPlanCode = '';
     Get.snackbar('Payment Failed', response.message ?? 'Payment was cancelled or failed.', backgroundColor: Colors.red, colorText: Colors.white);
   }
 
@@ -374,12 +389,47 @@ class CustomerController extends GetxController {
   }
 
   Future<void> purchasePlan(String planCode) async {
+    final plan = availablePlans.firstWhere((p) => p['code'] == planCode, orElse: () => {});
+    if (plan.isEmpty) return;
+
+    final price = (plan['priceMonthly'] ?? plan['price_monthly'] ?? 0) as num;
+    if (price <= 0) {
+      // Free plan or error
+      try {
+        await ApiService.instance.purchaseCustomerPlan(planCode);
+        await fetchActiveSubscription();
+        Get.snackbar('Success', 'Subscribed to plan successfully!', backgroundColor: Colors.green, colorText: Colors.white);
+      } catch (e) {
+        Get.snackbar('Error', 'Failed to subscribe: $e', backgroundColor: Colors.red, colorText: Colors.white);
+      }
+      return;
+    }
+
+    if (kIsWeb) {
+      Get.snackbar('Not Supported', 'Online payment is not available on web.', backgroundColor: Colors.orange, colorText: Colors.white);
+      return;
+    }
+
     try {
-      await ApiService.instance.purchaseCustomerPlan(planCode);
-      await fetchActiveSubscription();
-      Get.snackbar('Success', 'Subscribed to plan successfully!', backgroundColor: Colors.green, colorText: Colors.white);
+      _isSubscribing = true;
+      _pendingPlanCode = planCode;
+      
+      final orderData = await ApiService.createRazorpayOrder(price.toDouble());
+      final options = {
+        'key': 'rzp_live_RoLpvsh1Qs9Cfs', // Real Key ID
+        'amount': orderData['amount'],
+        'name': 'Rideal Laundry',
+        'description': 'Subscription Plan Purchase',
+        'order_id': orderData['id'],
+        'prefill': {
+          'contact': '9876543210',
+          'email': session.value?.email ?? '',
+        }
+      };
+      _razorpay.open(options);
     } catch (e) {
-      Get.snackbar('Error', 'Failed to subscribe: $e', backgroundColor: Colors.red, colorText: Colors.white);
+      _isSubscribing = false;
+      Get.snackbar('Error', 'Failed to initialize payment: $e', backgroundColor: Colors.red, colorText: Colors.white);
     }
   }
 

@@ -13,10 +13,10 @@ import '../core/models/delivery_order.dart';
 String get _kDefaultBase {
   final env = const String.fromEnvironment('API_BASE_URL', defaultValue: '');
   if (env.isNotEmpty) return env;
-  if (kIsWeb) return 'https://laundryback.ridealdigitalseva.com';
+  if (kIsWeb) return 'http://localhost:8000';
   if (defaultTargetPlatform == TargetPlatform.android)
-    return 'https://laundryback.ridealdigitalseva.com'; // using ADB reverse
-  return 'https://laundryback.ridealdigitalseva.com';
+    return 'http://192.168.1.7:8000'; // local IP for testing
+  return 'http://192.168.1.7:8000';
 }
 
 // ── Exceptions ──────────────────────────────────────────────────
