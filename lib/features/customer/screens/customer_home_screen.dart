@@ -87,7 +87,7 @@ class _CustHomeTabState extends State<_CustHomeTab> {
               const SizedBox(height: 6),
               Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(20)),
-                  child: Text('📦 ${ctrl.selectedPlan.value?['name'] ?? 'No Plan'}', style: const TextStyle(color: Colors.white, fontSize: 12))),
+                  child: Text('📦 ${ctrl.activeSubscription.value?['plan_name'] ?? 'No Active Plan'}', style: const TextStyle(color: Colors.white, fontSize: 12))),
               const SizedBox(height: 6),
               Row(children: [const Icon(Icons.account_balance_wallet_outlined, color: Colors.white70, size: 14), const SizedBox(width: 4),
                 Text('₹${ctrl.walletBalance.value.toStringAsFixed(0)} Wallet', style: const TextStyle(color: Colors.white70, fontSize: 12))]),

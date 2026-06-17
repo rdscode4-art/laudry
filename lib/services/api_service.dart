@@ -13,10 +13,10 @@ import '../core/models/delivery_order.dart';
 String get _kDefaultBase {
   final env = const String.fromEnvironment('API_BASE_URL', defaultValue: '');
   if (env.isNotEmpty) return env;
-  if (kIsWeb) return 'https://laundryback.ridealdigitalseva.com';
+  if (kIsWeb) return 'http://192.168.1.14:8000';
   if (defaultTargetPlatform == TargetPlatform.android)
-    return 'https://laundryback.ridealdigitalseva.com';
-  return 'https://laundryback.ridealdigitalseva.com';
+    return 'http://192.168.1.14:8000';
+  return 'http://192.168.1.14:8000';
 }
 
 // ── Exceptions ──────────────────────────────────────────────────
@@ -604,16 +604,18 @@ class ApiService {
       headers: instance._getHeaders('/api/driver/location'),
       body: jsonEncode({'latitude': lat, 'longitude': lng}),
     );
-    if (res.statusCode != 200) throw Exception(res.body);
+    if (res.statusCode != 200) {
+      final decoded = jsonDecode(res.body);
+      throw ApiException(decoded['message'] ?? 'Failed to update location');
+    }
   }
 
   static Future<void> updateDriverStatus(String status) async {
-    final res = await http.post(
-      Uri.parse('$_kDefaultBase/api/driver/status'),
-      headers: instance._getHeaders('/api/driver/status'),
-      body: jsonEncode({'status': status}),
+    await instance._request(
+      'POST',
+      '/api/driver/status',
+      body: {'status': status},
     );
-    if (res.statusCode != 200) throw Exception(res.body);
   }
 
   static Future<void> fetchDriverProfile() async {
@@ -631,6 +633,11 @@ class ApiService {
       );
       await instance._deliverySession.save(updated);
     }
+  }
+
+  static Future<Map<String, dynamic>> fetchDriverProfileData() async {
+    final res = await instance._request('GET', '/api/driver/profile');
+    return res['data'] as Map<String, dynamic>;
   }
 
   static Future<Map<String, dynamic>> fetchDriverDashboardStats() async {
@@ -880,6 +887,48 @@ class ApiService {
     await _request(
       'POST',
       '/api/customer/subscription/subscribe',
+      body: {'planCode': planCode},
+    );
+  }
+
+  // ── Vendor Subscriptions ───────────────────────────────────────
+  Future<List<Map<String, dynamic>>> fetchVendorPlans() async {
+    final res = await _request('GET', '/api/subscriptions/plans');
+    return (res['data'] as List<dynamic>)
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  Future<Map<String, dynamic>?> fetchVendorActiveSubscription() async {
+    final res = await _request('GET', '/api/subscriptions/me');
+    return res['data']['subscription'] as Map<String, dynamic>?;
+  }
+
+  Future<void> purchaseVendorPlan(String planCode) async {
+    await _request(
+      'POST',
+      '/api/subscriptions/subscribe',
+      body: {'planCode': planCode},
+    );
+  }
+
+  // ── Driver Subscriptions ───────────────────────────────────────
+  Future<List<Map<String, dynamic>>> fetchDriverPlans() async {
+    final res = await _request('GET', '/api/driver/subscription/plans');
+    return (res['data'] as List<dynamic>)
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  Future<Map<String, dynamic>?> fetchDriverActiveSubscription() async {
+    final res = await _request('GET', '/api/driver/subscription');
+    return res['data'] as Map<String, dynamic>?;
+  }
+
+  Future<void> purchaseDriverPlan(String planCode) async {
+    await _request(
+      'POST',
+      '/api/driver/subscription/subscribe',
       body: {'planCode': planCode},
     );
   }
@@ -1268,6 +1317,22 @@ class ApiService {
   }
 
   // --- Vendor Broadcast ---
+  static Future<Map<String, dynamic>> setVendorOnlineStatus(bool isOnline) async {
+    final token = instance.currentVendorAuth?.token;
+    if (token == null) return {'success': false, 'message': 'Not logged in'};
+
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/vendor/status'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+        body: jsonEncode({'isOnline': isOnline}),
+      );
+      return jsonDecode(res.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to update online status'};
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> fetchVendorBroadcastOrders() async {
     try {
       final res = await instance._request(

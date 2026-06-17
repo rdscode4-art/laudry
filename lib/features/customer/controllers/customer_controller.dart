@@ -224,6 +224,9 @@ class CustomerController extends GetxController {
   }
 
   double calculateGrandTotal() {
+    if (activeSubscription.value != null) {
+      return 0; // Completely free for active subscriptions
+    }
     double subtotal = calculateItemSubtotal();
     if (subtotal == 0) return 0;
     return subtotal + calculateTax() + deliveryCharge.value;
@@ -290,7 +293,7 @@ class CustomerController extends GetxController {
     try {
       final orderData = await ApiService.createRazorpayOrder(total);
       final options = {
-        'key': 'rzp_live_RoLpvsh1Qs9Cfs', // Real Key ID
+        'key': 'rzp_test_SznBROOyov9Oda', // Real Key ID
         'amount': orderData['amount'],
         'name': 'Rideal Laundry',
         'description': 'Laundry Service Booking',
@@ -309,11 +312,17 @@ class CustomerController extends GetxController {
 
   Future<bool> createOrder(String address) async {
     final method = selectedPaymentMethod.value;
+    final total = calculateGrandTotal();
+
+    if (total == 0) {
+      // If the user has a subscription, the order is completely free
+      return await _submitOrder(address, 'FREE', 'paid', null);
+    }
+
     if (method == 'ONLINE') {
       await initiateOnlinePayment(address);
       return false; // Dialog will be handled in success listener
     } else if (method == 'WALLET') {
-      final total = calculateGrandTotal();
       if (walletBalance.value < total) {
         Get.snackbar('Error', 'Insufficient wallet balance. Please recharge your wallet.', backgroundColor: Colors.red, colorText: Colors.white);
         return false;
@@ -416,7 +425,7 @@ class CustomerController extends GetxController {
       
       final orderData = await ApiService.createRazorpayOrder(price.toDouble());
       final options = {
-        'key': 'rzp_live_RoLpvsh1Qs9Cfs', // Real Key ID
+        'key': 'rzp_test_SznBROOyov9Oda', // Real Key ID
         'amount': orderData['amount'],
         'name': 'Rideal Laundry',
         'description': 'Subscription Plan Purchase',
@@ -463,7 +472,7 @@ class CustomerController extends GetxController {
       _rechargeAmount = amount;
       final orderData = await ApiService.createRazorpayOrder(amount);
       final options = {
-        'key': 'rzp_live_RoLpvsh1Qs9Cfs', // Real Key ID
+        'key': 'rzp_test_SznBROOyov9Oda', // Real Key ID
         'amount': orderData['amount'],
         'name': 'Rideal Laundry',
         'description': 'Wallet Recharge',

@@ -537,13 +537,21 @@ class _BookScreenState extends State<BookScreen> {
                     Text('₹${delivery.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
                   ]),
                 ],
+                if (ctrl.activeSubscription.value != null) ...[
+                  const SizedBox(height: 4),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    const Text('Subscription Benefit', style: TextStyle(fontSize: 14, color: kAccentGreen, fontWeight: FontWeight.bold)),
+                    Text('-₹${(subtotal + tax + delivery).toStringAsFixed(2)}', style: const TextStyle(fontSize: 14, color: kAccentGreen, fontWeight: FontWeight.bold)),
+                  ]),
+                ],
                 const Divider(height: 16),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                   const Text('Grand Total', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   Text('₹${total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kAccentGreen)),
                 ]),
-                const Divider(height: 24),
-                RadioListTile<String>(
+                if (total > 0) ...[
+                  const Divider(height: 24),
+                  RadioListTile<String>(
                   title: const Text('Cash on Delivery', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                   value: 'COD',
                   groupValue: ctrl.selectedPaymentMethod.value,
@@ -570,6 +578,20 @@ class _BookScreenState extends State<BookScreen> {
                   activeColor: kAccentBlue,
                   visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
                 ),
+                ] else ...[
+                  const Divider(height: 24),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: kAccentGreen.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.check_circle, color: kAccentGreen, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(child: Text('Order is completely covered by your active subscription plan! 🎉', style: TextStyle(color: kAccentGreen, fontSize: 13, fontWeight: FontWeight.bold))),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           );

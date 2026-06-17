@@ -14,6 +14,10 @@ import '../../role_selection/screens/role_selection_screen.dart';
 import '../widgets/delivery_order_card.dart';
 import 'delivery_order_detail_screen.dart';
 
+import 'package:razorpay_flutter/razorpay_flutter.dart'
+    if (dart.library.html) '../../../core/stubs/razorpay_stub.dart';
+import 'package:flutter/foundation.dart';
+
 class DeliveryHomeScreen extends StatefulWidget {
   final String boyName;
   const DeliveryHomeScreen({super.key, required this.boyName});
@@ -40,11 +44,21 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
   bool _isShowingIncoming = false;
   final Set<String> _ignoredOrders = {};
   Timer? _pollTimer;
+  Map<String, dynamic>? _activeSubscription;
+
+  late Razorpay _razorpay;
+  String? _pendingPlanCode;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (!kIsWeb) {
+      _razorpay = Razorpay();
+      _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+      _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+      _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    }
     
     // Configure to use Alarm stream so it plays loud like notifications
     _audioPlayer.setAudioContext(const AudioContext(
@@ -116,7 +130,39 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
     SocketService.instance.removeNotifListener(_onSocketNotification);
     _stopOrderSound();
     _audioPlayer.dispose();
+    if (!kIsWeb) _razorpay.clear();
     super.dispose();
+  }
+
+  // ── Razorpay Handlers ──────────────────────────────────────────
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    try {
+      final success = await ApiService.verifyRazorpayPayment(
+        razorpayOrderId: response.orderId ?? '',
+        razorpayPaymentId: response.paymentId ?? '',
+        razorpaySignature: response.signature ?? '',
+      );
+      if (success && _pendingPlanCode != null) {
+        await ApiService.instance.purchaseDriverPlan(_pendingPlanCode!);
+        await _fetchData();
+        Get.snackbar('Success', 'Subscription Activated!', backgroundColor: Colors.green, colorText: Colors.white);
+      } else {
+        Get.snackbar('Error', 'Payment verification failed', backgroundColor: Colors.red, colorText: Colors.white);
+      }
+    } catch (e) {
+      Get.snackbar('Error', e.toString(), backgroundColor: Colors.red, colorText: Colors.white);
+    } finally {
+      _pendingPlanCode = null;
+    }
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    _pendingPlanCode = null;
+    Get.snackbar('Payment Failed', response.message ?? 'Unknown error', backgroundColor: Colors.red, colorText: Colors.white);
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    Get.snackbar('Wallet Selected', response.walletName ?? 'Unknown wallet', backgroundColor: Colors.blue, colorText: Colors.white);
   }
 
   Future<void> _toggleStatus(bool val) async {
@@ -135,7 +181,8 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
       _fetchData();
     } catch (e) {
       setState(() => _isOnline = !val);
-      Get.snackbar('Error', e.toString().replaceAll('Exception: ', ''));
+      final msg = e is ApiException ? e.message : e.toString().replaceAll('Exception: ', '');
+      Get.snackbar('Error', msg);
     }
   }
 
@@ -173,17 +220,26 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
   }
 
   Future<void> _fetchData() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
-      final pickups = await ApiService.instance.fetchAvailablePickups();
-      final deliveries = await ApiService.instance.fetchAvailableDeliveries();
+      final profile = await ApiService.fetchDriverProfileData();
+      bool currentOnline = false;
+      if (profile['status'] == 'online') {
+        currentOnline = true;
+      }
+
+      final pickups = currentOnline ? await ApiService.instance.fetchAvailablePickups() : <DeliveryOrder>[];
+      final deliveries = currentOnline ? await ApiService.instance.fetchAvailableDeliveries() : <DeliveryOrder>[];
       final myRides = await ApiService.instance.fetchMyRides();
       final stats = await ApiService.fetchDriverDashboardStats();
       Map<String, dynamic> settings = {};
+      Map<String, dynamic>? sub;
       try {
         settings = await ApiService.instance.fetchPlatformSettings();
+        sub = await ApiService.instance.fetchDriverActiveSubscription();
       } catch (e) {
-        debugPrint('Failed to fetch platform settings: $e');
+        debugPrint('Failed to fetch platform settings/subscription: $e');
       }
       
       if (mounted) {
@@ -192,6 +248,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
             .toList();
             
         setState(() {
+          _isOnline = currentOnline;
           _available = allAvailable;
           _myRides = myRides;
           if (stats['totalEarnings'] != null) {
@@ -203,6 +260,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
           if (settings['min_withdraw_driver'] != null) {
             _minWithdraw = (settings['min_withdraw_driver'] as num).toDouble();
           }
+          _activeSubscription = sub;
           _loading = false;
         });
 
@@ -379,7 +437,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
     return Scaffold(
       backgroundColor: kLightBg,
       appBar: AppBar(
-        title: Row(mainAxisSize: MainAxisSize.min, children: [ClipOval(child: Image.asset('assets/images/logo.jpeg', width: 30, height: 30, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.delivery_dining, color: Colors.white, size: 24))), const SizedBox(width: 8), const Text('RiDeal Delivery', style: TextStyle(fontWeight: FontWeight.bold))]),
+        title: Row(mainAxisSize: MainAxisSize.min, children: [ClipOval(child: Image.asset('assets/images/logo.jpeg', width: 30, height: 30, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.delivery_dining, color: Colors.white, size: 24))), const SizedBox(width: 8), const Flexible(child: Text('RiDeal Delivery', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis))]),
         actions: [Padding(padding: const EdgeInsets.only(right: 12), child: GestureDetector(onTap: () => _showProfile(context), child: CircleAvatar(radius: 18, backgroundColor: Colors.white.withOpacity(0.25), child: Text(widget.boyName[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)))))],
       ),
       body: Column(children: [
@@ -440,6 +498,8 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
       const SizedBox(height: 12), Text(widget.boyName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kPrimaryBlue)),
       const SizedBox(height: 4), const Text('Delivery Partner · RiDeal Laundry India', style: TextStyle(fontSize: 13, color: Colors.grey)),
       const SizedBox(height: 20),
+      OutlinedButton.icon(onPressed: () { Navigator.pop(context); _showSubscriptionDialog(); }, icon: const Icon(Icons.star, color: kOrange), label: Text(_activeSubscription == null ? 'Get Subscription' : 'Manage Subscription', style: const TextStyle(color: kOrange)), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), side: const BorderSide(color: kOrange), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
+      const SizedBox(height: 12),
       OutlinedButton.icon(onPressed: () { ApiService.instance.currentDeliveryAuth = null; Get.offAll(() => RoleSelectionScreen()); }, icon: const Icon(Icons.logout, color: Colors.redAccent), label: const Text('Logout', style: TextStyle(color: Colors.redAccent)), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), side: const BorderSide(color: Colors.redAccent), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)))),
       const SizedBox(height: 8),
     ])));
@@ -460,6 +520,21 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
               hintText: 'Amount (Max ₹${_walletBalance.toStringAsFixed(0)})',
               border: const OutlineInputBorder(),
             ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () {
+              Get.back();
+              _showSubscriptionDialog();
+            },
+            icon: const Icon(Icons.star, color: kOrange),
+            label: Text(_activeSubscription == null ? 'Get Subscription' : 'Manage Subscription',
+                style: const TextStyle(color: kOrange)),
+            style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                side: const BorderSide(color: kOrange),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12))),
           ),
           const SizedBox(height: 8),
           Text(
@@ -494,5 +569,156 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen>
         )
       ],
     ));
+  }
+
+  void _showSubscriptionDialog() async {
+    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+    List<Map<String, dynamic>> plans = [];
+    try {
+      plans = await ApiService.instance.fetchDriverPlans();
+    } catch (e) {
+      if (mounted) {
+        Get.back();
+        Get.snackbar('Error', 'Plans fetch failed: ${e is ApiException ? e.message : e}',
+            backgroundColor: Colors.red, colorText: Colors.white);
+      }
+      return;
+    }
+    if (!mounted) return;
+    Get.back();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                const Icon(Icons.star, color: kOrange),
+                const SizedBox(width: 8),
+                const Text('Driver Subscription', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kPrimaryBlue)),
+              ]),
+              const SizedBox(height: 12),
+              if (_activeSubscription != null && _activeSubscription!['status'] == 'active') ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green)
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.check_circle, color: Colors.green),
+                    const SizedBox(width: 8),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Active Plan: ${_activeSubscription!['plan_name'] ?? _activeSubscription!['plan_code'] ?? 'N/A'}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                      Text('Valid till: ${(_activeSubscription!['expires_at'] ?? 'N/A').toString().split('T').first}',
+                          style: const TextStyle(fontSize: 12, color: Colors.green)),
+                    ])),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+              ],
+              const Text('Choose a plan:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: plans.isEmpty
+                  ? const Center(child: Text('No plans available', style: TextStyle(color: Colors.grey)))
+                  : ListView.builder(
+                  itemCount: plans.length,
+                  itemBuilder: (context, index) {
+                    final plan = plans[index];
+                    final price = plan['price_monthly'] ?? 0;
+                    final validityDays = plan['validity_days'] ?? 30;
+                    final isCurrentPlan = _activeSubscription?['plan_code'] == plan['code'] &&
+                        _activeSubscription?['status'] == 'active';
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      elevation: isCurrentPlan ? 3 : 1,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: isCurrentPlan ? kAccentGreen : Colors.grey.shade300, width: isCurrentPlan ? 2 : 1),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(children: [
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Row(children: [
+                              Text(plan['name'] ?? 'Plan', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              if (isCurrentPlan) ...[
+                                const SizedBox(width: 8),
+                                Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: kAccentGreen, borderRadius: BorderRadius.circular(10)), child: const Text('Active', style: TextStyle(color: Colors.white, fontSize: 10))),
+                              ],
+                            ]),
+                            const SizedBox(height: 4),
+                            Text('₹$price / ${validityDays >= 60 ? "${validityDays ~/ 30} months" : "month"}',
+                                style: const TextStyle(color: kOrange, fontWeight: FontWeight.bold, fontSize: 14)),
+                          ])),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isCurrentPlan ? Colors.grey : kPrimaryBlue,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: isCurrentPlan ? null : () => _purchasePlan(plan),
+                            child: Text(isCurrentPlan ? 'Current' : 'Select'),
+                          ),
+                        ]),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _purchasePlan(Map<String, dynamic> plan) async {
+    Get.back(); // close modal
+    _pendingPlanCode = plan['code'];
+    final total = plan['price_monthly'] ?? plan['priceMonthly'];
+
+    if (total == null || total == 0) {
+      try {
+        await ApiService.instance.purchaseDriverPlan(_pendingPlanCode!);
+        await _fetchData();
+        Get.snackbar('Success', 'Subscribed successfully!', backgroundColor: Colors.green, colorText: Colors.white);
+      } catch (e) {
+        Get.snackbar('Error', 'Failed to activate plan: $e', backgroundColor: Colors.red, colorText: Colors.white);
+      }
+      return;
+    }
+
+    try {
+      final orderData = await ApiService.createRazorpayOrder((total as num).toDouble());
+      final options = {
+        'key': 'rzp_test_SznBROOyov9Oda', // Use your test or live key
+        'amount': orderData['amount'],
+        'name': 'RiDeal Laundry',
+        'description': 'Driver Subscription: ${plan['name']}',
+        'order_id': orderData['id'],
+        'prefill': {
+          'contact': '9999999999',
+          'email': 'driver@rideal.in'
+        },
+        'theme': {'color': '#1E88E5'},
+      };
+      if (!kIsWeb) {
+        _razorpay.open(options);
+      } else {
+        Get.snackbar('Web Payment', 'Razorpay is not supported on web. Use mobile app.');
+      }
+    } catch (e) {
+      _pendingPlanCode = null;
+      Get.snackbar('Error', 'Could not initiate payment: $e', backgroundColor: Colors.red, colorText: Colors.white);
+    }
   }
 }
